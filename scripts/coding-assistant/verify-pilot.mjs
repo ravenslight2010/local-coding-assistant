@@ -51,7 +51,7 @@ console.log("Coding-assistant pilot verification\n");
   const { readdirSync } = await import("node:fs");
   const dir = path.join(root, "scripts/coding-assistant/tests");
   const files = readdirSync(dir)
-    .filter((f) => f.endsWith(".test.mjs"))
+    .filter((f) => f.endsWith(".test.mjs") && f !== "verify-pilot-artifacts.test.mjs")
     .map((f) => path.join(dir, f));
   const r = spawnSync(process.execPath, ["--test", ...files], {
     cwd: root,
@@ -118,9 +118,10 @@ const report =
 
 // 4) installer files present
 for (const rel of [
-  "scripts/self-host/coding-assistant/Install-CodingAssistant.ps1",
-  "scripts/self-host/coding-assistant/Install-CodingAssistant-DOUBLECLICK.cmd",
-  "scripts/self-host/coding-assistant/README.md",
+  "Get-CodeAgent.cmd",
+  "CA-Setup.cmd",
+  "scripts/ca/setup.ps1",
+  "README.md",
   "docs/coding-assistant/pilot-runbook.md",
   "scripts/coding-assistant/chat-ui/server.mjs",
 ]) {

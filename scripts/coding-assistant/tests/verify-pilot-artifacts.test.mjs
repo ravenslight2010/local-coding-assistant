@@ -13,6 +13,6 @@ test("verify-pilot passes static checks without --live", () => {
     { cwd: root, encoding: "utf8" },
   );
   assert.equal(r.status, 0, r.stderr || r.stdout);
-  assert.match(r.stdout + r.stderr, /Summary:.*fail/);
+  assert.match(r.stdout + r.stderr, /Summary:.*0 fail/);
   assert.doesNotMatch(r.stdout + r.stderr, /^FAIL /m);
 });
