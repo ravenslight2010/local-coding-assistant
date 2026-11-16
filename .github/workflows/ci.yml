@@ -24,7 +24,5 @@ jobs:
           echo "Required files present"
       - name: Syntax check server
         run: node --check scripts/coding-assistant/chat-ui/server.mjs
-      - name: Server starts
-        run: |
-          timeout 5s node scripts/coding-assistant/chat-ui/server.mjs --port 7843 || true
-          echo "Server launch attempted"
+      - name: Run unit and server smoke tests
+        run: node --test scripts/coding-assistant/tests/*.test.mjs
