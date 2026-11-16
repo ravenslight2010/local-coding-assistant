@@ -5,6 +5,15 @@ color 0B
 
 set "AGENT=C:\runcalc\agent"
 set "TMP=%TEMP%\ca-get"
+set "STARTUP="
+
+:parse
+if "%~1"=="" goto done
+if /i "%~1"=="/startup" set "STARTUP=-AddStartup"
+shift
+goto parse
+:done
+
 mkdir "%TMP%" 2>nul
 mkdir "%AGENT%" 2>nul
 mkdir "%AGENT%\logs" 2>nul
@@ -12,7 +21,7 @@ mkdir "%AGENT%\logs" 2>nul
 net session >nul 2>&1
 if not %errorlevel%==0 (
   echo Requesting Administrator...
-  powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+  powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs"
   exit /b
 )
 
@@ -29,7 +38,7 @@ if not exist "%TMP%\setup.ps1" (
 
 echo.
 echo Running setup...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%TMP%\setup.ps1" -RepoRoot "%AGENT%\app" -LaunchChat
+powershell -NoProfile -ExecutionPolicy Bypass -File "%TMP%\setup.ps1" -RepoRoot "%AGENT%\app" %STARTUP% -LaunchChat
 set EC=%ERRORLEVEL%
 echo.
 if %EC%==0 (echo Setup OK) else (echo Setup finished with issues — see %AGENT%\logs)
