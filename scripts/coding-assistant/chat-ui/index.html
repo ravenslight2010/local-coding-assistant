@@ -111,31 +111,56 @@
     function addToolCard(toolObj) {
       const card = document.createElement("div");
       card.className = "tool-card";
-      card.innerHTML = `<strong>${toolObj.tool}</strong> ${toolObj.path || toolObj.command || ""}`;
+      const heading = document.createElement("strong");
+      heading.textContent = String(toolObj.tool || "Tool");
+      card.appendChild(heading);
+      card.appendChild(document.createTextNode(" " + String(toolObj.path || toolObj.command || "")));
       if (toolObj.old || toolObj.new) {
         const pre = document.createElement("pre");
-        pre.textContent = (toolObj.old || "") + "\n---\n" + (toolObj.new || "");
+        pre.textContent = String(toolObj.old || "") + "\n---\n" + String(toolObj.new || "");
         card.appendChild(pre);
       }
+      const status = document.createElement("span");
+      status.className = "tool-status";
+      status.textContent = "Preparing approval…";
+      card.appendChild(status);
       const row = document.createElement("div");
       row.className = "btn-row";
       const allow = document.createElement("button");
       allow.className = "ok";
       allow.textContent = "Allow";
+      allow.disabled = true;
       const deny = document.createElement("button");
       deny.className = "warn";
       deny.textContent = "Deny";
+      let approvalId = null;
       allow.onclick = async () => {
-        const r = await fetch("/api/tool/apply", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(toolObj) });
-        const d = await r.json();
-        addMsg("system", r.ok ? "Applied: " + JSON.stringify(d) : "Failed: " + (d.error || ""));
-        card.remove();
+        allow.disabled = true;
+        try {
+          const r = await fetch("/api/tool/apply", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ approvalId }) });
+          const d = await r.json();
+          addMsg("system", r.ok ? "Applied: " + JSON.stringify(d) : "Failed: " + (d.error || ""));
+          card.remove();
+        } catch (e) {
+          status.textContent = "Approval failed: " + e.message;
+        }
       };
       deny.onclick = () => { addMsg("system", "Denied"); card.remove(); };
       row.appendChild(allow); row.appendChild(deny);
       card.appendChild(row);
       log.appendChild(card);
       log.scrollTop = log.scrollHeight;
+      fetch("/api/tool/prepare", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ tool: toolObj }) })
+        .then(async (r) => {
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || "tool request rejected");
+          approvalId = data.approvalId;
+          status.textContent = "Review the exact change, then allow or deny.";
+          allow.disabled = false;
+        })
+        .catch((e) => {
+          status.textContent = "Cannot approve: " + e.message;
+        });
     }
 
     function extractTools(text) {
@@ -331,7 +356,15 @@
       }
     }
 
-    document.getElementById("searchBadge").onclick = () => {
+    document.getElementById("searchBadge").onclick = async () => {
+      if (!searchEnabled) {
+        const response = await fetch("/api/diagnostics");
+        const diagnostics = await response.json();
+        if (!diagnostics.searchAllowed) {
+          addMsg("system", "Optional search is disabled. Restart the server with CA_ALLOW_SEARCH=1 to enable it.");
+          return;
+        }
+      }
       searchEnabled = !searchEnabled;
       const b = document.getElementById("searchBadge");
       b.textContent = searchEnabled ? "search: on" : "search: off";
@@ -358,15 +391,39 @@
       if (!searchEnabled) { addMsg("system", "Search is off. Click the badge."); return; }
       addMsg("system", "Searching: " + q);
       try {
-        const r = await fetch("/api/search?q=" + encodeURIComponent(q) + "&force=1");
+        const r = await fetch("/api/search?q=" + encodeURIComponent(q));
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || "");
         const card = document.createElement("div");
         card.className = "tool-card";
-        card.innerHTML = "<strong>Search: " + q + "</strong>";
+        const heading = document.createElement("strong");
+        heading.textContent = "Search: " + q;
+        card.appendChild(heading);
         for (const res of (data.results || []).slice(0, 5)) {
           const div = document.createElement("div");
-          div.innerHTML = `<a href="${res.url}" target="_blank" style="color:var(--accent)">${res.title || "result"}</a><br><span style="color:var(--muted)">${(res.snippet||"").slice(0,200)}</span>`;
+          let link = null;
+          try {
+            const url = new URL(res.url);
+            if (url.protocol === "http:" || url.protocol === "https:") link = url.href;
+          } catch {}
+          if (link) {
+            const a = document.createElement("a");
+            a.href = link;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.style.color = "var(--accent)";
+            a.textContent = String(res.title || "result");
+            div.appendChild(a);
+          } else {
+            const title = document.createElement("strong");
+            title.textContent = String(res.title || "result");
+            div.appendChild(title);
+          }
+          div.appendChild(document.createElement("br"));
+          const snippet = document.createElement("span");
+          snippet.style.color = "var(--muted)";
+          snippet.textContent = String(res.snippet || "").slice(0, 200);
+          div.appendChild(snippet);
           card.appendChild(div);
         }
         log.appendChild(card);
