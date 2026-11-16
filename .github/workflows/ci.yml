@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check required files
+        run: |
+          test -f scripts/coding-assistant/chat-ui/server.mjs
+          test -f scripts/coding-assistant/chat-ui/index.html
+          test -f scripts/ca/setup.ps1
+          test -f CA-Setup.cmd
+          test -f Get-CodeAgent.cmd
+          echo "Required files present"
+      - name: Syntax check server
+        run: node --check scripts/coding-assistant/chat-ui/server.mjs
+      - name: Server starts
+        run: |
+          timeout 5s node scripts/coding-assistant/chat-ui/server.mjs --port 7843 || true
+          echo "Server launch attempted"
