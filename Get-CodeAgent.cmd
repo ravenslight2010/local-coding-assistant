@@ -16,11 +16,10 @@ if not %errorlevel%==0 (
   exit /b
 )
 
-echo Downloading latest Code Agent installer from GitHub...
+echo Downloading latest Code Agent installer...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ProgressPreference='SilentlyContinue';" ^
-  "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/ravenslight2010/Production-run-calculator/feature/local-coding-assistant/scripts/ca/setup.ps1' -OutFile '%TMP%\setup.ps1';" ^
-  "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/ravenslight2010/Production-run-calculator/feature/local-coding-assistant/CA-Setup.cmd' -OutFile '%TMP%\CA-Setup.cmd';"
+  "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/scripts/ca/setup.ps1' -OutFile '%TMP%\setup.ps1';"
 
 if not exist "%TMP%\setup.ps1" (
   echo Download failed. Check internet and try again.
