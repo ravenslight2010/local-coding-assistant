@@ -4,7 +4,7 @@
  * Binds 127.0.0.1. Optional search. Sessions, tools with approval, gold-set helper.
  */
 import http from "node:http";
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, appendFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, appendFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -102,6 +102,12 @@ const HOST = "127.0.0.1";
 const PORT = Number(flag("--port", "7843")) || 7843;
 const OLLAMA = flag("--ollama", "http://127.0.0.1:11434");
 const MODEL = flag("--model", "qwen2.5-coder:7b");
+const MAX_BODY_BYTES = 1024 * 1024;
+const TOOL_APPROVAL_TTL_MS = 5 * 60 * 1000;
+const MAX_PENDING_TOOL_APPROVALS = 100;
+const pendingToolApprovals = new Map();
+const allowedOrigins = new Set([`http://${HOST}:${PORT}`, `http://localhost:${PORT}`]);
+const allowedHosts = new Set([`${HOST}:${PORT}`, `localhost:${PORT}`]);
 
 const SYSTEM = `You are a local coding assistant (Ollama only — no cloud token limits).
 Repo root: ${root}
@@ -125,8 +131,44 @@ function safeResolve(rel) {
   const cleaned = String(rel || "").replace(/\\/g, "/").replace(/^\/+/, "");
   if (cleaned.includes("..") || cleaned.includes(".git")) return null;
   const abs = path.resolve(root, cleaned);
-  if (!abs.startsWith(root)) return null;
-  return abs;
+  const relative = path.relative(root, abs);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  try {
+    const realRoot = realpathSync(root);
+    const realAbs = realpathSync(abs);
+    const realRelative = path.relative(realRoot, realAbs);
+    if (realRelative === ".." || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative)) return null;
+    return realAbs;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTool(tool) {
+  if (!tool || typeof tool !== "object" || Array.isArray(tool)) return null;
+  if (tool.tool === "edit" && typeof tool.path === "string" && typeof tool.old === "string" && tool.old.length > 0) {
+    const abs = safeResolve(tool.path);
+    if (!abs || !existsSync(abs) || !statSync(abs).isFile()) return null;
+    return { tool: "edit", path: path.relative(root, abs).replace(/\\/g, "/"), old: tool.old, new: String(tool.new || "") };
+  }
+  if (tool.tool === "shell" && process.env.CA_ALLOW_SHELL === "1" && typeof tool.command === "string" && tool.command.trim()) {
+    return { tool: "shell", command: tool.command };
+  }
+  return null;
+}
+
+function pruneToolApprovals() {
+  const now = Date.now();
+  for (const [id, approval] of pendingToolApprovals) {
+    if (approval.expiresAt <= now) pendingToolApprovals.delete(id);
+  }
+}
+
+function isSameOriginRequest(req) {
+  const origin = req.headers.origin;
+  const host = String(req.headers.host || "").toLowerCase();
+  const fetchSite = req.headers["sec-fetch-site"];
+  return allowedOrigins.has(origin) && allowedHosts.has(host) && (!fetchSite || fetchSite === "same-origin");
 }
 
 function send(res, status, body, type = "application/json; charset=utf-8") {
@@ -137,13 +179,35 @@ function send(res, status, body, type = "application/json; charset=utf-8") {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    let size = 0;
+    let tooLarge = false;
+    req.on("data", (c) => {
+      if (tooLarge) return;
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => {
+      if (tooLarge) {
+        const error = new Error("request body too large");
+        error.statusCode = 413;
+        reject(error);
+        return;
+      }
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
     req.on("error", reject);
   });
 }
 
-function sessionFile(id) { return path.join(SESSIONS_DIR, id + ".json"); }
+function isSafeRecordId(id) {
+  return typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id);
+}
+function sessionFile(id) { return isSafeRecordId(id) ? path.join(SESSIONS_DIR, id + ".json") : null; }
 function listSessions() {
   try {
     return readdirSync(SESSIONS_DIR)
@@ -162,16 +226,17 @@ function listSessions() {
 }
 function loadSession(id) {
   const p = sessionFile(id);
-  if (!existsSync(p)) return null;
+  if (!p || !existsSync(p)) return null;
   return JSON.parse(readFileSync(p, "utf8"));
 }
 function saveSession(sess) {
+  if (!isSafeRecordId(sess.id)) throw new Error("invalid session id");
   sess.updated = Date.now();
   writeFileSync(sessionFile(sess.id), JSON.stringify(sess, null, 2));
 }
 
 
-function taskFile(id) { return path.join(TASKS_DIR, id + ".json"); }
+function taskFile(id) { return isSafeRecordId(id) ? path.join(TASKS_DIR, id + ".json") : null; }
 function listTasks() {
   try {
     return readdirSync(TASKS_DIR)
@@ -188,10 +253,11 @@ function listTasks() {
 }
 function loadTask(id) {
   const p = taskFile(id);
-  if (!existsSync(p)) return null;
+  if (!p || !existsSync(p)) return null;
   return JSON.parse(readFileSync(p, "utf8"));
 }
 function saveTask(t) {
+  if (!isSafeRecordId(t.id)) throw new Error("invalid task id");
   t.updated = Date.now();
   writeFileSync(taskFile(t.id), JSON.stringify(t, null, 2));
 }
@@ -225,8 +291,23 @@ function loadContextPack() {
 
 const publicIndex = path.join(__dirname, "index.html");
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((error) => {
+    if (res.headersSent) return res.destroy();
+    const status = error.statusCode === 413 ? 413 : 400;
+    return send(res, status, { error: status === 413 ? "request body too large" : "invalid request" });
+  });
+});
+
+async function handleRequest(req, res) {
   const url = new URL(req.url || "/", `http://${HOST}:${PORT}`);
+  if (url.pathname.startsWith("/api/") && req.method !== "GET" && req.method !== "HEAD") {
+    if (req.method !== "POST") return send(res, 405, { error: "method not allowed" });
+    if (!isSameOriginRequest(req)) return send(res, 403, { error: "same-origin request required" });
+    if (!/^application\/json(?:\s*;|\s*$)/i.test(String(req.headers["content-type"] || ""))) {
+      return send(res, 415, { error: "application/json required" });
+    }
+  }
 
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
     if (!existsSync(publicIndex)) return send(res, 500, { error: "index.html missing" });
@@ -273,6 +354,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/sessions") {
     const body = JSON.parse(await readBody(req) || "{}");
     const id = body.id || randomUUID().slice(0, 8);
+    if (!isSafeRecordId(id)) return send(res, 400, { error: "invalid session id" });
     const sess = loadSession(id) || { id, title: body.title || "New session", messages: [], repo: root };
     if (body.messages) sess.messages = body.messages;
     if (body.title) sess.title = body.title;
@@ -309,7 +391,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/api/search") {
-    const allow = process.env.CA_ALLOW_SEARCH === "1" || url.searchParams.get("force") === "1";
+    const allow = process.env.CA_ALLOW_SEARCH === "1";
     if (!allow) return send(res, 403, { error: "search disabled" });
     const q = (url.searchParams.get("q") || "").trim();
     if (!q) return send(res, 400, { error: "missing q" });
@@ -331,24 +413,45 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (req.method === "POST" && url.pathname === "/api/tool/prepare") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const tool = normalizeTool(body.tool);
+    if (!tool) return send(res, 400, { error: "invalid tool request" });
+    pruneToolApprovals();
+    if (pendingToolApprovals.size >= MAX_PENDING_TOOL_APPROVALS) return send(res, 429, { error: "too many pending approvals" });
+    const approvalId = randomUUID();
+    pendingToolApprovals.set(approvalId, {
+      tool,
+      root: realpathSync(root),
+      expiresAt: Date.now() + TOOL_APPROVAL_TTL_MS,
+    });
+    return send(res, 200, { approvalId });
+  }
+
   if (req.method === "POST" && url.pathname === "/api/tool/apply") {
     const body = JSON.parse(await readBody(req) || "{}");
-    if (body.tool === "edit") {
-      const abs = safeResolve(body.path);
+    pruneToolApprovals();
+    const approval = pendingToolApprovals.get(body.approvalId);
+    if (!approval) return send(res, 403, { error: "valid approval required" });
+    pendingToolApprovals.delete(body.approvalId);
+    if (approval.root !== realpathSync(root)) return send(res, 409, { error: "repository changed; prepare the tool again" });
+    const tool = approval.tool;
+    if (tool.tool === "edit") {
+      const abs = safeResolve(tool.path);
       if (!abs || !existsSync(abs)) return send(res, 404, { error: "file not found" });
       let content = readFileSync(abs, "utf8");
-      if (body.old && content.includes(body.old)) {
-        content = content.replace(body.old, body.new || "");
+      if (content.includes(tool.old)) {
+        content = content.replace(tool.old, tool.new);
         writeFileSync(abs, content);
-        return send(res, 200, { ok: true, path: body.path });
+        return send(res, 200, { ok: true, path: tool.path });
       }
       return send(res, 400, { error: "old text not found" });
     }
-    if (body.tool === "shell") {
+    if (tool.tool === "shell") {
       if (process.env.CA_ALLOW_SHELL !== "1") return send(res, 403, { error: "shell disabled" });
       const { spawn } = await import("node:child_process");
       const isWin = process.platform === "win32";
-      const child = spawn(isWin ? "cmd.exe" : "bash", isWin ? ["/d", "/s", "/c", body.command] : ["-lc", body.command], { cwd: root, windowsHide: true });
+      const child = spawn(isWin ? "cmd.exe" : "bash", isWin ? ["/d", "/s", "/c", tool.command] : ["-lc", tool.command], { cwd: root, windowsHide: true });
       let out = "";
       child.stdout.on("data", (d) => { out += d.toString(); });
       child.stderr.on("data", (d) => { out += d.toString(); });
@@ -365,6 +468,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/tasks") {
     const body = JSON.parse(await readBody(req) || "{}");
     const id = body.id || randomUUID().slice(0, 8);
+    if (!isSafeRecordId(id)) return send(res, 400, { error: "invalid task id" });
     const task = {
       id,
       type: body.type || "task",
@@ -425,7 +529,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === "POST" && url.pathname === "/api/session/import") {
     const body = JSON.parse(await readBody(req) || "{}");
-    if (!body.id || !Array.isArray(body.messages)) return send(res, 400, { error: "bad session" });
+    if (!isSafeRecordId(body.id) || !Array.isArray(body.messages)) return send(res, 400, { error: "bad session" });
     saveSession(body);
     return send(res, 200, { ok: true, id: body.id });
   }
@@ -528,7 +632,7 @@ if (req.method === "GET" && url.pathname === "/api/health") {
   }
 
   send(res, 404, { error: "not found" });
-});
+}
 
 server.listen(PORT, HOST, () => {
   console.log(`Code Agent (local Ollama) http://${HOST}:${PORT}/`);
