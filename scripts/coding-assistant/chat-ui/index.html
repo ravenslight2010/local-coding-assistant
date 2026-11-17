@@ -87,7 +87,9 @@
       </form>
     </section>
   </main>
-  <script>
+  <script type="module">
+    import { consumeChatStream } from "/chat-stream.mjs";
+
     const log = document.getElementById("log");
     const tree = document.getElementById("tree");
     const modelSel = document.getElementById("model");
@@ -447,6 +449,7 @@
       const send = document.getElementById("send");
       send.disabled = true;
       const assistantEl = addMsg("assistant", "");
+      let full = "";
       try {
         const r = await fetch("/api/chat", {
           method: "POST",
@@ -460,31 +463,24 @@
           }),
         });
         if (!r.ok || !r.body) throw new Error("stream failed");
-        const reader = r.body.getReader();
-        const dec = new TextDecoder();
-        let full = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = dec.decode(value, { stream: true });
-          for (const line of chunk.split("\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const data = line.slice(6).trim();
-            if (data === "[DONE]") continue;
-            try {
-              const j = JSON.parse(data);
-              const delta = j.choices?.[0]?.delta?.content || "";
-              if (delta) { full += delta; assistantEl.textContent = full; log.scrollTop = log.scrollHeight; }
-            } catch {}
-          }
-        }
+        await consumeChatStream(r.body, (delta) => {
+          full += delta;
+          assistantEl.textContent = full;
+          log.scrollTop = log.scrollHeight;
+        });
         messages.push({ role: "assistant", content: full });
         const tools = extractTools(full);
         for (const t of tools) addToolCard(t);
         await saveSession();
         refreshCtx();
       } catch (e) {
-        assistantEl.textContent = "Error: " + e.message;
+        if (full) {
+          assistantEl.textContent = full + "\n\n[Stream interrupted: " + e.message + "]";
+          messages.push({ role: "assistant", content: assistantEl.textContent });
+          await saveSession();
+        } else {
+          assistantEl.textContent = "Error: " + e.message;
+        }
       } finally {
         send.disabled = false;
       }

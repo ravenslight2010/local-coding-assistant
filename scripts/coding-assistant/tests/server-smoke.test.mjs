@@ -49,6 +49,11 @@ test("chat UI server starts and serves the app", async () => {
     assert.ok(response, `server did not become reachable${output ? `:\n${output}` : ""}`);
     assert.equal(response.status, 200);
     assert.match(await response.text(), /<title>Code Agent<\/title>/);
+
+    const streamModule = await fetch(`http://127.0.0.1:${port}/chat-stream.mjs`);
+    assert.equal(streamModule.status, 200);
+    assert.match(streamModule.headers.get("content-type") || "", /javascript/);
+    assert.match(await streamModule.text(), /consumeChatStream/);
   } finally {
     if (child.exitCode === null) child.kill("SIGTERM");
     await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 1000))]);

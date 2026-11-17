@@ -319,6 +319,7 @@ async function handleRequest(req, res) {
     const staticMap = {
       "/manifest.webmanifest": ["manifest.webmanifest", "application/manifest+json; charset=utf-8"],
       "/sw.js": ["sw.js", "application/javascript; charset=utf-8"],
+      "/chat-stream.mjs": ["chat-stream.mjs", "application/javascript; charset=utf-8"],
     };
     const hit = staticMap[url.pathname];
     if (hit) {
