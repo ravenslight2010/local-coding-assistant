@@ -24,6 +24,7 @@ const samplePath = path.join(fixtureRepo, "sample.txt");
 const outsidePath = path.join(tempRoot, "outside.txt");
 const escapedSessionPath = path.join(tempRoot, "escaped.json");
 const escapedTaskPath = path.join(tempRoot, "task-escaped.json");
+const sourcePath = path.join(fixtureRepo, "src", "main.js");
 let serverProcess;
 let baseUrl;
 let serverOutput = "";
@@ -52,6 +53,11 @@ before(async () => {
   mkdirSync(fixtureRepo, { recursive: true });
   writeFileSync(path.join(fixtureRepo, "package.json"), "{}\n");
   writeFileSync(samplePath, "before\n");
+  mkdirSync(path.dirname(sourcePath), { recursive: true });
+  writeFileSync(sourcePath, "export const answer = 42;\n");
+  writeFileSync(path.join(fixtureRepo, ".env"), "SEARCH_SECRET_VALUE=private\n");
+  mkdirSync(path.join(fixtureRepo, "node_modules", "fixture"), { recursive: true });
+  writeFileSync(path.join(fixtureRepo, "node_modules", "fixture", "ignored.js"), "export const answer = 42;\n");
   writeFileSync(outsidePath, "private\n");
   symlinkSync(outsidePath, path.join(fixtureRepo, "outside-link.txt"));
   const port = await freePort();
@@ -131,6 +137,40 @@ test("does not read a symlink outside the selected repository", async () => {
   }));
   assert.equal(prepareResponse.status, 400);
   assert.equal(readFileSync(outsidePath, "utf8"), "private\n");
+});
+
+test("coding-mode reads stay in the repository and exclude credential files", async () => {
+  const sourceResponse = await post("/api/tool/read", JSON.stringify({
+    tool: { tool: "read", path: "src/main.js" },
+  }));
+  assert.equal(sourceResponse.status, 200);
+  const source = await sourceResponse.json();
+  assert.equal(source.content, "export const answer = 42;\n");
+
+  const secretResponse = await post("/api/tool/read", JSON.stringify({
+    tool: { tool: "read", path: ".env" },
+  }));
+  assert.equal(secretResponse.status, 403);
+
+  const outsideResponse = await post("/api/tool/read", JSON.stringify({
+    tool: { tool: "read", path: "../outside.txt" },
+  }));
+  assert.equal(outsideResponse.status, 404);
+});
+
+test("coding-mode search is literal, bounded, and skips secret and dependency files", async () => {
+  const searchResponse = await post("/api/tool/read", JSON.stringify({
+    tool: { tool: "search", query: "answer = 42" },
+  }));
+  assert.equal(searchResponse.status, 200);
+  const result = await searchResponse.json();
+  assert.equal(result.matches.length, 1);
+  assert.equal(result.matches[0].path, "src/main.js");
+
+  const broadQuery = await post("/api/tool/read", JSON.stringify({
+    tool: { tool: "search", query: "a" },
+  }));
+  assert.equal(broadQuery.status, 400);
 });
 
 test("applies only the exact prepared tool once", async () => {

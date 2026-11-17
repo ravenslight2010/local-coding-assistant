@@ -5,11 +5,15 @@ A fully local coding assistant that runs on your machine with Ollama. No cloud t
 ## What it includes
 - One-click Windows installer
 - Chat UI with streaming, sessions, and tool approval cards
+- Bounded coding loop: inspect repo files, propose edits, run approved tests, and use results to continue
 - Domain skills (imports, QC, sync, security, accessibility, releases, etc.)
 - Task queue for bug reports, alerts, and feedback
 - Optional web search (off by default)
 - Persistent memory and research context pack
 - Multi-repo support (point it at v1, v2, or any checkout)
+
+## Coding loop
+Turn on **Code loop** to let the assistant search and read relevant repository files, propose focused edits, then use approved command results to continue its work. Repository reads are bounded and skip common dependency/build folders and credential files. File edits and shell commands always require your approval; shell commands are disabled unless the server is launched with `CA_ALLOW_SHELL=1`.
 
 ## Quick start (Windows)
 1. Download and double-click:  
