@@ -46,8 +46,8 @@ set "RUNCALC_REPO=%APP%"
 start "CodeAgentServer" /MIN cmd /c "node \"%SERVER%\" --port 7843 --model qwen2.5-coder:7b"
 timeout /t 2 /nobreak >nul
 
-echo [5] Open browser...
-start http://127.0.0.1:7843/
+echo [5] Open Code Agent...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%APP%\ui\open-app.ps1" -Port 7843
 
 echo.
 echo If the page loads but chat still fails, wait 30-60s for the model to load, then send again.

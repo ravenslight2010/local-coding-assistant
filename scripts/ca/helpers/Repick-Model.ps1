@@ -34,9 +34,8 @@ $lines = @(
   "`$env:RUNCALC_REPO = '$app'"
   'try { Invoke-WebRequest http://127.0.0.1:11434/api/tags -UseBasicParsing -TimeoutSec 2 | Out-Null } catch { Start-Process ollama -ArgumentList serve -WindowStyle Hidden; Start-Sleep 2 }'
   '$server = Join-Path $app ''ui\server.mjs'''
-  '$proc = Start-Process node -ArgumentList @($server, ''--port'', "$port", ''--model'', $model) -WorkingDirectory $app -WindowStyle Minimized -PassThru'
-  'Start-Sleep 1'
-  'Start-Process "http://127.0.0.1:$port/"'
+  '$proc = Start-Process node -ArgumentList @($server, ''--port'', "$port", ''--model'', $model) -WorkingDirectory $app -WindowStyle Hidden -PassThru'
+  '& (Join-Path $app ''ui\open-app.ps1'') -Port $port'
   'Write-Host "model=$model pid=$($proc.Id)"'
 )
 $lines | Set-Content -LiteralPath $run -Encoding UTF8

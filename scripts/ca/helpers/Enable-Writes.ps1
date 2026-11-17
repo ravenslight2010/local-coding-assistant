@@ -139,9 +139,8 @@ $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine('try { Invoke-WebRequest -Uri "http://127.0.0.1:11434/api/tags" -UseBasicParsing -TimeoutSec 2 | Out-Null } catch { Start-Process ollama -ArgumentList serve -WindowStyle Hidden; Start-Sleep 2 }')
 [void]$sb.AppendLine('$server = Join-Path $app "ui\server.mjs"')
 [void]$sb.AppendLine('try { $ex = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($ex) { Stop-Process -Id $ex.OwningProcess -Force -ErrorAction SilentlyContinue; Start-Sleep 1 } } catch { }')
-[void]$sb.AppendLine('$proc = Start-Process -FilePath "node" -ArgumentList @($server, "--port", "$port", "--model", $model) -WorkingDirectory $app -WindowStyle Minimized -PassThru')
-[void]$sb.AppendLine('Start-Sleep 2')
-[void]$sb.AppendLine('Start-Process "http://127.0.0.1:$port/"')
+[void]$sb.AppendLine('$proc = Start-Process -FilePath "node" -ArgumentList @($server, "--port", "$port", "--model", $model) -WorkingDirectory $app -WindowStyle Hidden -PassThru')
+[void]$sb.AppendLine('& (Join-Path $app "ui\open-app.ps1") -Port $port')
 [void]$sb.AppendLine('Write-Host "WRITE-ENABLED model=$model repo=$repo pid=$($proc.Id)"')
 [System.IO.File]::WriteAllText((Join-Path $AgentRoot "run.ps1"), $sb.ToString())
 
