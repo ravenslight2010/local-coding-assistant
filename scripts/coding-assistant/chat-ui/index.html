@@ -73,6 +73,7 @@
     <button id="ctxBtn" title="Import context">Context</button>
     <button id="expBtn" title="Export session">Export</button>
     <button id="wfBtn" title="Workflows">Workflows</button>
+    <button id="testBtn" title="Plan tests">Test</button>
     <button id="secBtn" title="Secrets">Secrets</button>
     <button id="memSearch" title="Search memory">Recall</button>
   </header>
@@ -532,7 +533,20 @@
       refreshCtx();
     };
     
-    document.getElementById("wfBtn").onclick = async () => {
+    
+    document.getElementById("testBtn").onclick = async () => {
+      const hint = prompt("What changed? (ui, import, api, or leave blank)") || "";
+      const r = await fetch("/api/test/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, hint }),
+      });
+      const d = await r.json();
+      const lines = (d.plan || []).map((s) => s.step + ": " + s.cmd).join("\n") || "No tests discovered";
+      document.getElementById("input").value = "Run this test plan and report results:\n" + lines;
+      addMsg("system", "Test plan loaded.\n" + lines);
+    };
+document.getElementById("wfBtn").onclick = async () => {
       const r = await fetch("/api/workflows");
       const d = await r.json();
       const names = (d.workflows || []).map((w) => w.id).join(", ");

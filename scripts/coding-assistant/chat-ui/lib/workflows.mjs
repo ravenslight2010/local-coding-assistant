@@ -29,6 +29,19 @@ export const WORKFLOWS = {
     ],
     skill: "version-diff",
   },
+  "full-test": {
+    title: "Full test ladder",
+    steps: [
+      "Discover test scripts in the repo.",
+      "Run static checks.",
+      "Run unit tests for the changed area.",
+      "Probe local API routes the change touches.",
+      "If imports changed, validate gold sets.",
+      "If UI changed, run Playwright and axe.",
+      "Report what ran, what failed, and what was skipped.",
+    ],
+    skill: "full-test-suite",
+  },
   "bug-intake": {
     title: "Intake a bug",
     steps: [

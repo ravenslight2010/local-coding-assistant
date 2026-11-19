@@ -12,6 +12,7 @@ import { listSecretNames, setSecret, getSecret, deleteSecret } from "./lib/secre
 import { addMemory, searchMemory, listMemory } from "./lib/memory-store.mjs";
 import { trimMessages } from "./lib/trim.mjs";
 import { listWorkflows, getWorkflow } from "./lib/workflows.mjs";
+import { discoverTests, planFor } from "./lib/testing.mjs";
 import { execFileSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1114,6 +1115,18 @@ async function handleRequest(req, res) {
       }
     }
     return send(res, 200, { issues, count: issues.length });
+  }
+
+
+  if (req.method === "GET" && url.pathname === "/api/test/discover") {
+    const root = rootForSession(url.searchParams.get("sessionId"));
+    return send(res, 200, discoverTests(root));
+  }
+  if (req.method === "POST" && url.pathname === "/api/test/plan") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const root = rootForSession(body.sessionId);
+    const discovery = discoverTests(root);
+    return send(res, 200, { discovery, plan: planFor(body.hint || "", discovery) });
   }
 
 if (req.method === "GET" && url.pathname === "/api/health") {

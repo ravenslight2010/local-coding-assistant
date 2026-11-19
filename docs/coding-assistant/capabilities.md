@@ -23,3 +23,15 @@ Old turns are trimmed before they reach the model. Session export still keeps th
 
 ## Skills doctor
 `/api/skills/doctor` flags skills over 8 KB.
+
+## Testing
+Test button builds a ladder from the repo:
+1. Static (typecheck/lint)
+2. Unit
+3. API probes
+4. Gold sets (if present and imports changed)
+5. Playwright e2e (if present and UI changed)
+6. Accessibility (axe)
+7. Visual (only with baselines)
+
+Skills: full-test-suite, api-testing, a11y-testing, visual-regression, playwright-check, playwright-debugger.
