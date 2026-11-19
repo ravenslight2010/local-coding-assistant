@@ -937,6 +937,7 @@ async function handleRequest(req, res) {
       title: body.title || body.type || "Task",
       priority: Number(body.priority) || 5,
       status: "open",
+      body: body.body || (body.payload && body.payload.body) || "",
       payload: body.payload || {},
       skill: body.skill || null,
       created: Date.now(),

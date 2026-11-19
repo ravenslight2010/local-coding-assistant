@@ -76,7 +76,7 @@
   <main>
     <aside>
       <section>
-        <h2>Tasks</h2>
+        <h2>Tasks <button id="addTask" type="button" title="Add task" style="margin-left:0.4rem;padding:0.1rem 0.45rem;font-size:0.75rem">+ Task</button></h2>
         <div id="tasks"></div>
       </section>
       <section>
@@ -338,6 +338,21 @@
       }
     }
 
+
+
+    document.getElementById("addTask").onclick = async () => {
+      const title = prompt("Task title");
+      if (!title || !title.trim()) return;
+      const type = prompt("Type (bug, feedback, alert, task)", "task") || "task";
+      const body = prompt("Details (optional)", "") || "";
+      const id = "t-" + Date.now().toString(36);
+      await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, title: title.trim(), type: type.trim(), body, priority: 3, status: "open", payload: { body } }),
+      });
+      loadTasks();
+    };
 
     async function loadTasks() {
       const el = document.getElementById("tasks");
