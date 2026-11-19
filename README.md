@@ -44,7 +44,9 @@ The command also writes a `.sha256` file. No .NET SDK, npm dependencies, or buil
 - Hardware-selected Ollama coding model; setup fails if the selected model cannot be verified
 
 ## Using it with other repositories
-Set `RUNCALC_REPO` when launching the server. Use a separate server/agent directory for each repository until workspace-scoped selection is available.
+Use **Repo → Select** in the browser to set the current session's repository. The canonical path is saved with that session and restored when the session is reopened; changing another session does not change it. A repository must contain `package.json` or `.git`. Set `RUNCALC_REPO` when launching the server to choose the default for new sessions.
+
+Repository path checks are segment-aware: `.github` and filenames containing `..` are allowed, while traversal and `.git` metadata are blocked. Credential-like files are excluded from the file browser, coding reads/search, selected chat context, and edits.
 
 ## Verification
 ```bash

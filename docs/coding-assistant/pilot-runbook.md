@@ -10,7 +10,7 @@ The installed app is loopback-only at `http://127.0.0.1:7843/`; Ollama uses `127
 
 ## Repository and write safety
 
-Set `RUNCALC_REPO` explicitly when launching the server. Coding-mode reads are bounded and reject credential-like paths. Edit and shell tools require approval. Shell remains disabled unless `CA_ALLOW_SHELL=1`; enabling it does not remove per-command approval.
+Set `RUNCALC_REPO` explicitly when launching the server to choose the default for new sessions. Use **Repo → Select** to change only the current session's repository; reopening a session restores its saved canonical path. Coding-mode reads are bounded and all repository file entry points reject credential-like paths. `.github` is readable, but traversal and `.git` metadata are blocked. Edit and shell tools require approval and remain bound to the preparing session's repository. Shell stays disabled unless `CA_ALLOW_SHELL=1`; enabling it does not remove per-command approval.
 
 The older scripts under `scripts/ca/helpers/` are compatibility tools, not the canonical installer. Do not use helpers that patch application source or enable a separate write API.
 

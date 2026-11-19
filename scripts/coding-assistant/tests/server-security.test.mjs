@@ -55,6 +55,9 @@ before(async () => {
   writeFileSync(samplePath, "before\n");
   mkdirSync(path.dirname(sourcePath), { recursive: true });
   writeFileSync(sourcePath, "export const answer = 42;\n");
+  writeFileSync(path.join(fixtureRepo, "src", "patch..js"), "export const patch = true;\n");
+  mkdirSync(path.join(fixtureRepo, ".github", "workflows"), { recursive: true });
+  writeFileSync(path.join(fixtureRepo, ".github", "workflows", "ci.yml"), "# workflow_marker\n");
   writeFileSync(path.join(fixtureRepo, ".env"), "SEARCH_SECRET_VALUE=private\n");
   mkdirSync(path.join(fixtureRepo, "node_modules", "fixture"), { recursive: true });
   writeFileSync(path.join(fixtureRepo, "node_modules", "fixture", "ignored.js"), "export const answer = 42;\n");
@@ -156,6 +159,41 @@ test("coding-mode reads stay in the repository and exclude credential files", as
     tool: { tool: "read", path: "../outside.txt" },
   }));
   assert.equal(outsideResponse.status, 404);
+});
+
+test("all file entry points reject credentials and allow legitimate dot paths", async () => {
+  const fileSecret = await fetch(baseUrl + "/api/file?path=.env");
+  assert.equal(fileSecret.status, 403);
+
+  const chatSecret = await post("/api/chat", JSON.stringify({
+    messages: [],
+    contextFiles: [".env"],
+    stream: false,
+  }));
+  assert.equal(chatSecret.status, 403);
+
+  const editSecret = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "edit", path: ".env", old: "private", new: "changed" },
+  }));
+  assert.equal(editSecret.status, 400);
+  assert.equal(readFileSync(path.join(fixtureRepo, ".env"), "utf8"), "SEARCH_SECRET_VALUE=private\n");
+
+  const workflow = await fetch(baseUrl + "/api/file?path=.github/workflows/ci.yml");
+  assert.equal(workflow.status, 200);
+  assert.match((await workflow.json()).content, /workflow_marker/);
+
+  const doubleDot = await post("/api/tool/read", JSON.stringify({
+    tool: { tool: "read", path: "src/patch..js" },
+  }));
+  assert.equal(doubleDot.status, 200);
+  assert.match((await doubleDot.json()).content, /patch = true/);
+
+  const gitMetadata = await fetch(baseUrl + "/api/file?path=.git/config");
+  assert.equal(gitMetadata.status, 404);
+
+  const tree = await (await fetch(baseUrl + "/api/tree")).json();
+  assert.equal(tree.entries.some((entry) => entry.name === ".github"), true);
+  assert.equal(tree.entries.some((entry) => entry.name === ".env"), false);
 });
 
 test("coding-mode search is literal, bounded, and skips secret and dependency files", async () => {
