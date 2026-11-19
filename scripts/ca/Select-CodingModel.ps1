@@ -8,7 +8,6 @@ function Get-CodingModelChoice {
 
 
   # Prefer the last model the user actually used, if it is still a known choice.
-  $lastPath = Join-Path $AgentRoot "config\model-choice.json"
   $lastPath = if ($env:CA_AGENT_ROOT) { Join-Path $env:CA_AGENT_ROOT "config\model-choice.json" } else { "C:\runcalc\agent\config\model-choice.json" }
   if (Test-Path $lastPath) {
     try {
