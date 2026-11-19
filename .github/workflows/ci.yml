@@ -6,23 +6,88 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          node-version: '22'
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.5'
       - name: Check required files
         run: |
           test -f scripts/coding-assistant/chat-ui/server.mjs
           test -f scripts/coding-assistant/chat-ui/index.html
+          test -f scripts/coding-assistant/chat-ui/chat-stream.mjs
           test -f scripts/ca/setup.ps1
           test -f CA-Setup.cmd
           test -f Get-CodeAgent.cmd
-          echo "Required files present"
       - name: Syntax check server
         run: node --check scripts/coding-assistant/chat-ui/server.mjs
       - name: Run unit and server smoke tests
         run: node --test scripts/coding-assistant/tests/*.test.mjs
+
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.5'
+      - name: Build and verify canonical Windows bundle
+        run: node --test scripts/coding-assistant/tests/windows-bundle.test.mjs
+      - name: Build distributable bundle
+        run: bash scripts/ca/pack-windows-bundle.sh "$RUNNER_TEMP/CodeAgent-Windows-Setup.zip"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: code-agent-windows-setup
+          path: |
+            ${{ runner.temp }}/CodeAgent-Windows-Setup.zip
+            ${{ runner.temp }}/CodeAgent-Windows-Setup.zip.sha256
+          retention-days: 7
+
+  windows-package:
+    needs: bundle
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.5'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: code-agent-windows-setup
+          path: ${{ runner.temp }}/bundle
+      - name: Verify archive hash and extract
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'bundle\CodeAgent-Windows-Setup.zip'
+          $expected = (Get-Content "$archive.sha256").Split(' ')[0]
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw 'Bundle SHA-256 mismatch' }
+          Expand-Archive -LiteralPath $archive -DestinationPath "$env:RUNNER_TEMP\package" -Force
+      - name: Parse packaged PowerShell scripts
+        run: |
+          $errors = @()
+          Get-ChildItem "$env:RUNNER_TEMP\package" -Recurse -Filter '*.ps1' | ForEach-Object {
+            $tokens = $null
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$parseErrors)
+            $errors += $parseErrors
+          }
+          if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+      - name: Launch packaged server on Windows
+        env:
+          CA_PACKAGED_ROOT: ${{ runner.temp }}/package
+        run: node --test scripts/coding-assistant/tests/packaged-server-smoke.test.mjs
