@@ -72,6 +72,9 @@
     <button id="memBtn" title="Project memory">Memory</button>
     <button id="ctxBtn" title="Import context">Context</button>
     <button id="expBtn" title="Export session">Export</button>
+    <button id="wfBtn" title="Workflows">Workflows</button>
+    <button id="secBtn" title="Secrets">Secrets</button>
+    <button id="memSearch" title="Search memory">Recall</button>
   </header>
   <main>
     <aside>
@@ -528,7 +531,55 @@
       await saveSession();
       refreshCtx();
     };
-    document.getElementById("expBtn").onclick = async () => {
+    
+    document.getElementById("wfBtn").onclick = async () => {
+      const r = await fetch("/api/workflows");
+      const d = await r.json();
+      const names = (d.workflows || []).map((w) => w.id).join(", ");
+      const id = prompt("Workflow (" + names + ")");
+      if (!id) return;
+      const run = await fetch("/api/workflows/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, sessionId: sessionId }),
+      });
+      const out = await run.json();
+      if (!out.prompt) return alert(out.error || "failed");
+      document.getElementById("input").value = out.prompt;
+      addMsg("system", "Workflow loaded into the input. Send when ready.");
+    };
+    document.getElementById("secBtn").onclick = async () => {
+      const r = await fetch("/api/secrets");
+      const d = await r.json();
+      const action = prompt("Secrets: " + (d.names || []).join(", ") + "\nType set, get, or delete");
+      if (!action) return;
+      if (action === "set") {
+        const name = prompt("Secret name");
+        const value = prompt("Secret value");
+        if (!name || value === null) return;
+        await fetch("/api/secrets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, value }) });
+        alert("Saved " + name);
+      } else if (action === "get") {
+        const name = prompt("Secret name");
+        const g = await fetch("/api/secrets/get", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+        const j = await g.json();
+        alert(j.value ? "Retrieved (not shown in chat)" : "Not found");
+      } else if (action === "delete") {
+        const name = prompt("Secret name");
+        await fetch("/api/secrets", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+        alert("Deleted " + name);
+      }
+    };
+    document.getElementById("memSearch").onclick = async () => {
+      const q = prompt("Search memory");
+      if (!q) return;
+      const r = await fetch("/api/memory/search?q=" + encodeURIComponent(q) + "&sessionId=" + encodeURIComponent(sessionId || ""));
+      const d = await r.json();
+      const lines = (d.results || []).map((it) => "- " + it.text.slice(0, 160)).join("\n") || "No matches";
+      addMsg("system", "Memory recall:\n" + lines);
+    };
+
+document.getElementById("expBtn").onclick = async () => {
       if (!sessionId) { addMsg("system", "No session to export"); return; }
       const r = await fetch("/api/session/export?id=" + sessionId);
       const s = await r.json();

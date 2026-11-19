@@ -8,6 +8,10 @@ import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSy
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID, createHash } from "node:crypto";
+import { listSecretNames, setSecret, getSecret, deleteSecret } from "./lib/secrets.mjs";
+import { addMemory, searchMemory, listMemory } from "./lib/memory-store.mjs";
+import { trimMessages } from "./lib/trim.mjs";
+import { listWorkflows, getWorkflow } from "./lib/workflows.mjs";
 import { execFileSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -519,6 +523,21 @@ function saveTask(t) {
 function repositoryStateDir(root) {
   return path.join(AGENT_ROOT, "repositories", sha256(realpathSync(root)));
 }
+function repoKey(root) {
+  try { return sha256(realpathSync(root)).slice(0, 16); } catch { return "default"; }
+}
+function lastShaFile(root) {
+  return path.join(repositoryStateDir(root), "last-sha.txt");
+}
+function readLastSha(root) {
+  try { return readFileSync(lastShaFile(root), "utf8").trim(); } catch { return ""; }
+}
+function writeLastSha(root, sha) {
+  const p = lastShaFile(root);
+  const dir = path.dirname(p);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(p, sha);
+}
 function memoryFile(root) {
   return path.join(repositoryStateDir(root), "config", "MEMORY.md");
 }
@@ -668,8 +687,9 @@ function buildChatBody(payload, root) {
     const content = take("history", message.content);
     if (content) older.unshift({ role: message.role, content });
   }
-  const messages = [{ role: "system", content: sys }, ...older];
+  let messages = [{ role: "system", content: sys }, ...older];
   if (latest && fittedLatest) messages.push({ role: latest.role, content: fittedLatest });
+  messages = trimMessages(messages, { maxTurns: 16, maxChars: 28000 });
   stats.estimatedTokens = PROMPT_TOKEN_BUDGET - remaining;
   return {
     body: {
@@ -1015,6 +1035,85 @@ async function handleRequest(req, res) {
     }
     saveSession(body);
     return send(res, 200, { ok: true, id: body.id });
+  }
+
+
+  if (req.method === "GET" && url.pathname === "/api/secrets") {
+    return send(res, 200, { names: listSecretNames(AGENT_ROOT) });
+  }
+  if (req.method === "POST" && url.pathname === "/api/secrets") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    if (!body.name || body.value === undefined) return send(res, 400, { error: "name and value required" });
+    setSecret(AGENT_ROOT, body.name, body.value);
+    return send(res, 200, { ok: true, name: body.name });
+  }
+  if (req.method === "POST" && url.pathname === "/api/secrets/get") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const value = getSecret(AGENT_ROOT, body.name || "");
+    if (!value) return send(res, 404, { error: "not found" });
+    return send(res, 200, { name: body.name, value });
+  }
+  if (req.method === "DELETE" && url.pathname === "/api/secrets") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    deleteSecret(AGENT_ROOT, body.name || "");
+    return send(res, 200, { ok: true });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/memory/search") {
+    const root = rootForSession(url.searchParams.get("sessionId"));
+    const q = url.searchParams.get("q") || "";
+    return send(res, 200, { results: searchMemory(AGENT_ROOT, repoKey(root), q) });
+  }
+  if (req.method === "POST" && url.pathname === "/api/memory/note") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const root = rootForSession(body.sessionId);
+    if (!body.text) return send(res, 400, { error: "text required" });
+    const item = addMemory(AGENT_ROOT, repoKey(root), { text: body.text, tags: body.tags || [], kind: body.kind || "note" });
+    return send(res, 200, item);
+  }
+  if (req.method === "GET" && url.pathname === "/api/memory/index") {
+    const root = rootForSession(url.searchParams.get("sessionId"));
+    return send(res, 200, { items: listMemory(AGENT_ROOT, repoKey(root)) });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/workflows") {
+    return send(res, 200, { workflows: listWorkflows() });
+  }
+  if (req.method === "POST" && url.pathname === "/api/workflows/run") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const wf = getWorkflow(body.id);
+    if (!wf) return send(res, 404, { error: "unknown workflow" });
+    const root = rootForSession(body.sessionId);
+    const prompt = `Run workflow: ${wf.title}\nSteps:\n${wf.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\nUse skill ${wf.skill} if present.`;
+    return send(res, 200, { workflow: wf, prompt, repo: root });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/repo/sha") {
+    const root = rootForSession(url.searchParams.get("sessionId"));
+    let head = "";
+    try { head = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", timeout: 4000 }).trim(); } catch {}
+    const last = readLastSha(root);
+    if (head) writeLastSha(root, head);
+    return send(res, 200, { head, last, changed: last && head && last !== head });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/skills/doctor") {
+    const root = rootForSession(url.searchParams.get("sessionId"));
+    const dirs = [
+      path.join(AGENT_ROOT, "skills"),
+      path.join(root, "scripts", "coding-assistant", "domain-skills"),
+    ];
+    const issues = [];
+    for (const dir of dirs) {
+      if (!existsSync(dir)) continue;
+      for (const name of readdirSync(dir)) {
+        const skill = path.join(dir, name, "SKILL.md");
+        if (!existsSync(skill)) continue;
+        const size = statSync(skill).size;
+        if (size > 8000) issues.push({ skill: name, issue: "large", bytes: size });
+      }
+    }
+    return send(res, 200, { issues, count: issues.length });
   }
 
 if (req.method === "GET" && url.pathname === "/api/health") {
