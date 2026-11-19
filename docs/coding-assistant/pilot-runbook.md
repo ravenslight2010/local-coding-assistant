@@ -1,134 +1,47 @@
-# Coding assistant pilot runbook
+# Coding assistant setup and qualification runbook
 
-Fail-closed pilot: **local Ollama + read-only tooling**. No cloud
-providers, no write tools against the plant.
+## Install on Windows
 
-# Coding assistant pilot runbook
+Use `Get-CodeAgent.cmd` for a one-click download, or extract the full canonical bundle and run `CA-Setup.cmd`. Both paths invoke `scripts/ca/setup.ps1` and require no .NET SDK, npm dependencies, or manual build tools.
 
-## One-click install (Windows)
+The launcher verifies the source archive hash. Setup verifies official Node/Ollama installers, selects a coding model from host capacity, verifies that Ollama reports the model, and checks the complete application payload before reporting success.
 
-Double-click **`CA-Setup.cmd`** in the **repo root** (short name for Windows path limits).
+The installed app is loopback-only at `http://127.0.0.1:7843/`; Ollama uses `127.0.0.1:11434`. The desktop shortcut opens an Edge app window when available and otherwise uses the default browser. It is not a native `.exe`.
 
-Legacy long names still forward to the same setup:
-- `Install-CodingAssistant.cmd`
-- `scripts\self-host\coding-assistant\Install-CodingAssistant-DOUBLECLICK.cmd`
+## Repository and write safety
 
-Approves Admin → Node/Ollama/model if needed → copies app to `C:\runcalc\agent\app` → profile → **CodeAgent** shortcuts → launches chat UI.
+Set `RUNCALC_REPO` explicitly when launching the server. Coding-mode reads are bounded and reject credential-like paths. Edit and shell tools require approval. Shell remains disabled unless `CA_ALLOW_SHELL=1`; enabling it does not remove per-command approval.
 
-Logs: `C:\runcalc\agent\logs\setup-*.log`
+The older scripts under `scripts/ca/helpers/` are compatibility tools, not the canonical installer. Do not use helpers that patch application source or enable a separate write API.
 
-If setup fails, open the latest log in that folder and re-run **`CA-Setup.cmd`** from a short path checkout when possible (e.g. `C:\src\prc\` instead of a deep user folder).
+## Automated verification
 
-## Verify the pilot path (do this first)
-
-From the repo (Node 20+):
+With Node 22:
 
 ```bash
-node --test ./scripts/coding-assistant/tests
-node ./scripts/coding-assistant/verify-pilot.mjs --fixture
-# After Ollama is installed and a catalogue model is pulled:
-node ./scripts/coding-assistant/verify-pilot.mjs --fixture --live
+node --test scripts/coding-assistant/tests/*.test.mjs
+bash scripts/ca/pack-windows-bundle.sh /tmp/CodeAgent-Windows-Setup.zip
 ```
 
-Or: `pnpm coding-assistant:verify`
+The bundle regression checks the manifest/hash and starts the packaged server. Windows PowerShell parsing and extracted-package launch checks belong in the Windows CI qualification job.
 
-### Known gaps (honest)
+## Physical clean-machine qualification
 
-| Item | Status |
-|------|--------|
-| Unit tests + profile render | Automated in `verify-pilot` |
-| Read-only **template** invariants | Automated |
-| Ollama installed + catalogue model | Probe / `--live` |
-| OpenCode CLI install | Best-effort in Windows installer; package names vary — may need manual install from https://opencode.ai |
-| OpenCode **runtime** denies edit/shell | **Manual** — not automatable without OpenCode |
-| HostInspector real report | Preferred over `--fixture` for hardware qualification |
-| Chat UI | Local pilot at `pnpm coding-assistant:chat` (loopback) |
+Run this checklist on a newly reset supported Windows machine with no Node, Ollama, Code Agent, .NET SDK, or npm tooling preinstalled:
 
-## Prerequisites
+- [ ] Download only `Get-CodeAgent.cmd`; do not manually install prerequisites.
+- [ ] Confirm the displayed source commit is the intended release.
+- [ ] Run setup as Administrator and confirm archive/dependency hash checks complete without disabling SmartScreen, TLS validation, firewall protection, or machine execution policy.
+- [ ] Confirm setup installs Node and Ollama, selects a model appropriate to detected RAM/GPU capacity, and exits zero.
+- [ ] Open **Code Agent** from Desktop and Start Menu; confirm the UI loads without console errors or missing module requests.
+- [ ] Send a short non-sensitive prompt and receive a complete streamed response.
+- [ ] Select a disposable source repository; verify read/search, `.github` workflow reads, and credential-path rejection.
+- [ ] Propose an edit, modify the file before approval, and confirm stale approval is rejected without overwriting the file.
+- [ ] Approve a focused test command only in a disposable repository; confirm timeout/cancellation leaves no child process.
+- [ ] Reboot and use the optional Startup shortcut; confirm no duplicate server or model download is started.
 
-- Windows x64 host preferred (HostInspector is Windows-only).
-- Separate directories:
-  - Plant: e.g. `C:\runcalc\plant` — production
-  - Agent: e.g. `C:\runcalc\agent` — disposable git checkout + configs
+Record Windows edition/build, RAM/GPU, selected model, setup log path, and any failure. Until those results are captured, native setup and Edge launching are **implemented but not physically qualified**. CI is not a substitute for GPU/model and real-installer evidence.
 
-## 1. Host recommendation
+## Optional OpenCode pilot
 
-Run **RunCalculator.HostInspector** and save the JSON report.
-
-Tooling-only (not a host qualification):
-
-```bash
-pnpm coding-assistant:bootstrap -- --fixture --out .opencode/opencode.local.json
-```
-
-## 2. Render the read-only OpenCode profile
-
-```bash
-pnpm coding-assistant:check
-pnpm coding-assistant:bootstrap -- --report path/to/inspection.json --out .opencode/opencode.local.json
-```
-
-Confirm model id is catalogue-only (`qwen2.5-coder:7b` or `qwen3-coder:30b`).
-
-## 3. Install local inference (Ollama)
-
-1. Install [Ollama](https://ollama.com) for Windows (or use the installer script).
-2. Pull **only** the recommended model, e.g. `ollama pull qwen2.5-coder:7b`
-3. Keep Ollama on loopback (`127.0.0.1:11434`).
-
-## 4A. Chat UI pilot (no OpenCode required)
-
-```bash
-pnpm coding-assistant:chat
-# open http://127.0.0.1:7843/
-```
-
-- Loopback-only server
-- Optional read-only file attach from repo tree
-- Does **not** grant edit/shell tools (there are none in this UI)
-
-## 4B. OpenCode pilot (tool-denial testing)
-
-1. Install OpenCode: https://opencode.ai  
-2. Point it at `.opencode/opencode.local.json` (or your `--out` path).  
-3. Open the **agent** checkout — not plant data volumes.
-
-## 5. Acceptance checks
-
-- [ ] `verify-pilot --fixture` exits 0  
-- [ ] Chat UI answers a simple repo question with Ollama up  
-- [ ] OpenCode session (if used): edit/shell/web denied  
-- [ ] No cloud provider in rendered profile  
-- [ ] Ollama on localhost only  
-- [ ] Plant app stays usable during a short prompt (subjective)
-
-## 6. Out of scope until later
-
-- App diagnostics / incident bridge  
-- GitHub write or auto-PR  
-- Floor-user product AI  
-- Merging into Replit production without deliberate cutover  
-
-## Commands
-
-```bash
-pnpm coding-assistant:test
-pnpm coding-assistant:verify
-pnpm coding-assistant:check
-pnpm coding-assistant:bootstrap -- --fixture --out .opencode/opencode.local.json
-pnpm coding-assistant:chat
-```
-
-## Desktop / Start Menu icon
-
-The Windows installer creates:
-
-- Start Menu → **Run Calculator** → **Local Coding Assistant**
-- Desktop shortcut **Local Coding Assistant**
-- Icon: `scripts/coding-assistant/chat-ui/icons/coding-assistant.ico`
-
-The shortcut runs `Start-CodingAssistant.ps1` under the agent directory (starts loopback chat UI + opens the browser).
-
-### Optional PWA pin
-
-With the chat UI open in **Edge**, use **Install app** / *Apps → Install this site as an app* to pin a standalone window. Manifest: `/manifest.webmanifest` (localhost).
+OpenCode is a separate read-only integration and is not installed by the canonical chat UI setup. See `bootstrap-local.mjs` and `opencode-readonly.example.json`; retain its fail-closed profile checks and do not represent it as part of the one-click chat installer.

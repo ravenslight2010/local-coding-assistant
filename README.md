@@ -1,53 +1,59 @@
 # Local Coding Assistant
 
-A fully local coding assistant that runs on your machine with Ollama. No cloud token limits, no API keys required for inference.
+A local coding assistant that runs on your machine with Ollama. Inference requires no cloud API key.
 
 ## What it includes
-- One-click Windows installer
+- Versioned Windows setup with verified Node.js and Ollama downloads
 - Chat UI with streaming, sessions, and tool approval cards
-- Bounded coding loop: inspect repo files, propose edits, run approved tests, and use results to continue
-- Domain skills (imports, QC, sync, security, accessibility, releases, etc.)
-- Task queue for bug reports, alerts, and feedback
-- Optional web search (off by default)
-- Persistent memory and research context pack
-- Multi-repo support (point it at v1, v2, or any checkout)
+- Bounded coding loop: inspect repository files, propose edits, run approved tests, and use results to continue
+- Domain skills, a task queue, optional web search, persistent memory, and an opt-in context pack
+- Local checkout selection for coding tasks
 
 ## Coding loop
-Turn on **Code loop** to let the assistant search and read relevant repository files, propose focused edits, then use approved command results to continue its work. Repository reads are bounded and skip common dependency/build folders and credential files. File edits and shell commands always require your approval; shell commands are disabled unless the server is launched with `CA_ALLOW_SHELL=1`.
+Turn on **Code loop** to let the assistant search and read relevant repository files, propose focused edits, then use approved command results to continue. Repository reads are bounded and skip dependency/build folders and credential-like files. File edits and shell commands require approval; shell commands are disabled unless the server is launched with `CA_ALLOW_SHELL=1`.
 
 ## Quick start (Windows)
-1. Download and double-click:  
-   https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/Get-CodeAgent.cmd
-2. Approve Administrator.
-3. It installs Node.js LTS, Ollama, a coding model, and creates a Code Agent desktop shortcut.
+1. Download and double-click [Get-CodeAgent.cmd](https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/Get-CodeAgent.cmd).
+2. Approve Administrator. Setup downloads a commit-pinned source archive and verifies its SHA-256 before running it.
+3. Setup installs missing prerequisites, selects a model from detected RAM/GPU capacity, verifies the model, and creates the **Code Agent** shortcut.
 
-Launch **Code Agent** from the Desktop or Start Menu. It opens in a dedicated Microsoft Edge app window when Edge is installed, and falls back to your default browser otherwise. The app server and Ollama stay on your PC at `127.0.0.1`; this is a desktop-style window, not a self-contained `.exe`.
+Launch **Code Agent** from the Desktop or Start Menu. It opens in a dedicated Microsoft Edge app window when Edge is installed and falls back to your default browser otherwise. This is a desktop-style browser window, not a self-contained `.exe`.
 
-### Options
-```bat
-Get-CodeAgent.cmd /startup
-```
-Adds the assistant to Windows Startup.
+Use `Get-CodeAgent.cmd /startup` to add the assistant to Windows Startup. Re-running setup preserves project memory and uses versioned source folders rather than replacing an existing source installation.
 
-## Manual install
-If you already have the repo:
+## Manual or offline-source install
+Extract the full source bundle into a short path and run:
+
 ```bat
 CA-Setup.cmd
-CA-Setup.cmd /repair
 CA-Setup.cmd /startup
+CA-Setup.cmd /nolaunch
 ```
 
-## Runtime requirements
-- Node.js LTS (installed by the setup script)
-- Ollama (installed by the setup script)
-- A local model (default: qwen2.5-coder:7b)
+Build the canonical bundle on Linux/macOS with:
 
-No npm dependencies. The server uses only Node built-ins.
+```bash
+bash scripts/ca/pack-windows-bundle.sh ./CodeAgent-Windows-Setup.zip
+```
 
-## Using it with other repos
-The assistant can work against any local checkout. Set the repo path when launching, or use the multi-repo support in the UI. It is designed to help with Production-run-calculator (v1), Lucias-production-assistant-v2, and future versions.
+The command also writes a `.sha256` file. No .NET SDK, npm dependencies, or build tools are required to install or run the assistant.
+
+## Tested runtime
+- Node.js 22.23.5; missing Node is installed from the official MSI after SHA-256 verification
+- Ollama 0.40.16 when Ollama is absent; an existing Ollama installation is not replaced
+- Hardware-selected Ollama coding model; setup fails if the selected model cannot be verified
+
+## Using it with other repositories
+Set `RUNCALC_REPO` when launching the server. Use a separate server/agent directory for each repository until workspace-scoped selection is available.
+
+## Verification
+```bash
+node --test scripts/coding-assistant/tests/*.test.mjs
+```
+
+The suite builds the canonical ZIP, checks its manifest and hash, and starts its packaged server. A physical clean-machine run is still required to qualify native Ollama installation, hardware detection, model download, and Edge launching; see `docs/coding-assistant/pilot-runbook.md`.
 
 ## Folders
-- `scripts/ca/` — installer and helpers
-- `scripts/coding-assistant/` — chat UI, server, domain skills
-- `docs/coding-assistant/context/` — research docs loaded into every session
+- `scripts/ca/` — canonical setup, model selection, and bundle builder
+- `scripts/coding-assistant/` — chat UI, server, and domain skills
+- `docs/coding-assistant/context/` — optional project research context
