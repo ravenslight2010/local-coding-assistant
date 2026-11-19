@@ -129,9 +129,8 @@ try {
     'try { Invoke-WebRequest -Uri ''http://127.0.0.1:11434/api/tags'' -UseBasicParsing -TimeoutSec 2 | Out-Null } catch { if (Get-Command ollama -ErrorAction SilentlyContinue) { Start-Process -FilePath ''ollama'' -ArgumentList ''serve'' -WindowStyle Hidden; Start-Sleep -Seconds 2 } }'
     '$server = Join-Path $app ''ui\server.mjs'''
     'if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Write-Error ''Node missing. Run SETUP.cmd again.''; exit 1 }'
-    '$proc = Start-Process -FilePath ''node'' -ArgumentList @($server, ''--port'', "$port", ''--model'', $model) -WorkingDirectory $app -WindowStyle Minimized -PassThru'
-    'Start-Sleep -Seconds 1'
-    'Start-Process "http://127.0.0.1:$port/"'
+    '$proc = Start-Process -FilePath ''node'' -ArgumentList @($server, ''--port'', "$port", ''--model'', $model) -WorkingDirectory $app -WindowStyle Hidden -PassThru'
+    '& (Join-Path $app ''ui\open-app.ps1'') -Port $port'
     'Write-Host "Chat http://127.0.0.1:$port/ PID=$($proc.Id)"'
   )
   Set-Content -LiteralPath $run -Value $runLines -Encoding UTF8

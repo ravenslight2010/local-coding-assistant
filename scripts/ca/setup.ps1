@@ -232,9 +232,8 @@ foreach (`$p in @((Join-Path `$env:ProgramFiles 'nodejs'), (Join-Path `$env:LOCA
 `$env:RUNCALC_REPO = '$repo'
 try { Invoke-WebRequest http://127.0.0.1:11434/api/tags -UseBasicParsing -TimeoutSec 2 | Out-Null } catch { Start-Process ollama -ArgumentList serve -WindowStyle Hidden; Start-Sleep 2 }
 `$server = Join-Path `$app 'ui\server.mjs'
-Start-Process node -ArgumentList @(`$server, '--port', "`$port", '--model', `$model) -WorkingDirectory `$app -WindowStyle Minimized
-Start-Sleep 1
-Start-Process "http://127.0.0.1:`$port/"
+Start-Process node -ArgumentList @(`$server, '--port', "`$port", '--model', `$model) -WorkingDirectory `$app -WindowStyle Hidden
+& (Join-Path `$app 'ui\open-app.ps1') -Port `$port
 "@ | Set-Content -LiteralPath $run -Encoding UTF8
   Info "Wrote $run"
 }

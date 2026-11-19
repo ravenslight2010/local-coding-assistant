@@ -19,7 +19,9 @@ Turn on **Code loop** to let the assistant search and read relevant repository f
 1. Download and double-click:  
    https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/Get-CodeAgent.cmd
 2. Approve Administrator.
-3. It installs Node.js LTS, Ollama, a coding model, and launches the chat UI at http://127.0.0.1:7843/
+3. It installs Node.js LTS, Ollama, a coding model, and creates a Code Agent desktop shortcut.
+
+Launch **Code Agent** from the Desktop or Start Menu. It opens in a dedicated Microsoft Edge app window when Edge is installed, and falls back to your default browser otherwise. The app server and Ollama stay on your PC at `127.0.0.1`; this is a desktop-style window, not a self-contained `.exe`.
 
 ### Options
 ```bat

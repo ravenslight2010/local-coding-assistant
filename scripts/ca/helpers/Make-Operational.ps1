@@ -106,9 +106,8 @@ $lines = @(
   # free port if stale
   '$existing = Get-NetTCPConnection -LocalPort $port -State Listen -EA SilentlyContinue | Select-Object -First 1'
   'if ($existing) { try { Stop-Process -Id $existing.OwningProcess -Force -EA SilentlyContinue } catch {} ; Start-Sleep 1 }'
-  '$proc = Start-Process node -ArgumentList @($server, ''--port'', "$port", ''--model'', $model) -WorkingDirectory $app -WindowStyle Minimized -PassThru'
-  'Start-Sleep 2'
-  'Start-Process "http://127.0.0.1:$port/"'
+  '$proc = Start-Process node -ArgumentList @($server, ''--port'', "$port", ''--model'', $model) -WorkingDirectory $app -WindowStyle Hidden -PassThru'
+  '& (Join-Path $app ''ui\open-app.ps1'') -Port $port'
   'Write-Host "OPERATIONAL model=$model repo=$repo pid=$($proc.Id)"'
 )
 $lines | Set-Content -LiteralPath $run -Encoding UTF8

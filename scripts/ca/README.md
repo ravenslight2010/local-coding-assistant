@@ -15,7 +15,7 @@ That is the supported one-click installer (short name for Windows).
 3. Copies chat UI + helper scripts to **`C:\runcalc\agent\app\`** (short paths)  
 4. Writes profile to **`C:\runcalc\agent\config\oc.json`**  
 5. Creates shortcuts: **`CodeAgent.lnk`** (Desktop + Start Menu)  
-6. Launches chat at `http://127.0.0.1:7843/`  
+6. Opens the local chat in a dedicated Microsoft Edge app window (or the default browser if Edge is unavailable)
 
 Logs: `C:\runcalc\agent\logs\setup-*.log`
 
