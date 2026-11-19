@@ -1,20 +1,21 @@
 # Getting started with the coding assistant
 
-This file is loaded into every session as part of the research context pack.
+The files in this documentation directory are references, not an automatic prompt pack. Runtime context is repository-scoped and is included only after you import it for that repository and enable **Pack** for the session.
 
 ## What the assistant can help with
-- Reading and explaining code in any local repo
-- Drafting gold sets for imports
-- Diagnosing sync and auto-track issues
-- Reviewing QC, Brix, and HACCP related changes
+- Reading and explaining code in the selected local repository
+- Drafting and reviewing focused changes
+- Diagnosing application issues with repository evidence
 - Security, accessibility, and release checklists
-- Processing task queue items (bug reports, feedback, alerts)
+- Processing task queue items
 
 ## How to give it context
-- Attach files from the tree on the left
+- Select files from the repository tree
 - Activate skills from the Skills panel
-- Drop additional markdown into the context folder
-- Use the Memory button for short persistent notes
+- Use **Context** to import repository-specific markdown, then enable **Pack**
+- Use **Memory** for short persistent notes for the selected repository
+
+All prompt categories share one bounded budget. The meter estimates actual included content and reports truncation; it is not an exact model-tokenizer count.
 
 ## Offline first
 The model runs locally via Ollama. Search is optional and off by default.

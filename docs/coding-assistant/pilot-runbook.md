@@ -12,6 +12,8 @@ The installed app is loopback-only at `http://127.0.0.1:7843/`; Ollama uses `127
 
 Set `RUNCALC_REPO` explicitly when launching the server to choose the default for new sessions. Use **Repo → Select** to change only the current session's repository; reopening a session restores its saved canonical path. Coding-mode reads are bounded and all repository file entry points reject credential-like paths. `.github` is readable, but traversal and `.git` metadata are blocked. Edit and shell tools require approval and remain bound to the preparing session's repository. Shell stays disabled unless `CA_ALLOW_SHELL=1`; enabling it does not remove per-command approval. Edit approvals also bind the file SHA-256, reject stale content with `409`, and replace files atomically. The bounded audit at `agent/audit/tool-actions.json` retains at most 200 outcomes with relative edit paths and command hashes, never edit contents or command text. Browser disconnects abort Ollama streams; Windows shell timeouts invoke `taskkill /t /f` for process-tree cleanup.
 
+Memory and imported context are repository-scoped under `agent/repositories/<repository-hash>/`; the research pack requires the session's **Pack** opt-in. One `CA_PROMPT_TOKEN_BUDGET` (default 12,000 estimated tokens) bounds instructions, memory, pack, skills, selected files, attachments, and history together. The browser's `~` meter is based on the actual server-built content but is not an exact model-tokenizer count. Legacy global memory/context is retained on disk but not auto-migrated or injected.
+
 The older scripts under `scripts/ca/helpers/` are compatibility tools, not the canonical installer. Do not use helpers that patch application source or enable a separate write API.
 
 ## Automated verification

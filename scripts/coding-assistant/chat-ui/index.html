@@ -65,6 +65,7 @@
     <span class="badge" id="ollama">ollama: …</span>
     <span class="badge" id="modelBadge">model</span>
     <label class="coding-toggle"><input id="codingMode" type="checkbox" /> Code loop</label>
+    <label class="coding-toggle" title="Include this repository's imported research context"><input id="contextPack" type="checkbox" /> Pack</label>
     <select id="model" aria-label="Model"></select>
     <button id="newSess" title="New session">New</button>
     <button id="diag" title="Export diagnostics">Diag</button>
@@ -98,9 +99,9 @@
     <section class="chat">
       <div id="log" role="log" aria-live="polite" aria-relevant="additions text"></div>
       <div class="ctx-bar">
-        <span id="ctxLabel">Context: none</span>
+        <span id="ctxLabel">Files: none · pack off</span>
         <div class="meter"><span id="meterFill"></span></div>
-        <span id="meterText">0</span>
+        <span id="meterText">estimating…</span>
       </div>
       <form id="form">
         <textarea id="input" aria-label="Message" placeholder="Ask, /search …, or propose a change…" rows="2"></textarea>
@@ -121,6 +122,8 @@
     const activeSkills = new Set();
     let searchEnabled = false;
     let currentRepo = "";
+    let includeContext = false;
+    let estimateSequence = 0;
 
     function ensureSessionId() {
       if (!sessionId) sessionId = Math.random().toString(36).slice(2, 10);
@@ -132,6 +135,27 @@
       const url = new URL(pathname, window.location.origin);
       if (sessionId) url.searchParams.set("sessionId", sessionId);
       return url.pathname + url.search;
+    }
+
+    function promptPayload(codingMode = false) {
+      return {
+        sessionId: ensureSessionId(),
+        model: modelSel.value,
+        messages,
+        contextFiles: [...contextFiles],
+        skills: [...activeSkills],
+        includeContext,
+        codingMode,
+      };
+    }
+
+    function updatePromptMeter(stats) {
+      const used = Number(stats.estimatedTokens) || 0;
+      const budget = Number(stats.budgetTokens) || 1;
+      const pct = Math.min(100, Math.round(used / budget * 100));
+      document.getElementById("meterFill").style.width = pct + "%";
+      document.getElementById("meterText").textContent = `~${used} / ${budget} tok${stats.truncated ? " · truncated" : ""}`;
+      document.getElementById("meterText").title = "Server estimate from actual prompt content; tokenizer use varies by model.";
     }
 
     function addMsg(role, text) {
@@ -229,17 +253,18 @@
         const r = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: ensureSessionId(),
-            model: modelSel.value,
-            messages,
-            contextFiles: [...contextFiles],
-            skills: [...activeSkills],
-            codingMode,
-            stream: true,
-          }),
+          body: JSON.stringify({ ...promptPayload(codingMode), stream: true }),
         });
-        if (!r.ok || !r.body) throw new Error("stream failed");
+        if (!r.ok) {
+          const error = await r.json().catch(() => ({}));
+          throw new Error(error.error || "stream failed");
+        }
+        if (!r.body) throw new Error("stream failed");
+        updatePromptMeter({
+          estimatedTokens: r.headers.get("X-Prompt-Estimated-Tokens"),
+          budgetTokens: r.headers.get("X-Prompt-Budget-Tokens"),
+          truncated: r.headers.get("X-Prompt-Truncated") === "true",
+        });
         await consumeChatStream(r.body, (delta) => {
           full += delta;
           assistantEl.textContent = full;
@@ -336,6 +361,8 @@
       const t = await r.json();
       sessionId = null;
       messages = [];
+      includeContext = false;
+      document.getElementById("contextPack").checked = false;
       log.innerHTML = "";
       addMsg("system", "Task: " + t.title + " (" + t.type + ")");
       if (t.skill) {
@@ -382,6 +409,8 @@
       sessionId = s.id;
       localStorage.setItem("ca_session", id);
       messages = s.messages || [];
+      includeContext = s.includeContext === true;
+      document.getElementById("contextPack").checked = includeContext;
       currentRepo = s.repo || "";
       document.getElementById("repoPath").value = currentRepo;
       contextFiles.clear();
@@ -393,16 +422,27 @@
     }
     async function saveSession() {
       ensureSessionId();
-      await fetch("/api/sessions", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ id:sessionId, title: messages.find(m=>m.role==="user")?.content?.slice(0,40) || "Session", messages }) });
+      await fetch("/api/sessions", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ id:sessionId, title: messages.find(m=>m.role==="user")?.content?.slice(0,40) || "Session", messages, includeContext }) });
       loadSessions();
     }
 
-    function refreshCtx() {
-      document.getElementById("ctxLabel").textContent = contextFiles.size ? "Context: " + [...contextFiles].join(", ") : "Context: none";
-      const est = [...contextFiles].join(" ").length / 4 + messages.reduce((a,m)=>a+(m.content||"").length,0)/4;
-      const pct = Math.min(100, Math.round(est / 2000));
-      document.getElementById("meterFill").style.width = pct + "%";
-      document.getElementById("meterText").textContent = Math.round(est) + " tok";
+    async function refreshCtx() {
+      const sequence = ++estimateSequence;
+      document.getElementById("ctxLabel").textContent = (contextFiles.size ? "Files: " + [...contextFiles].join(", ") : "Files: none") + (includeContext ? " · pack on" : " · pack off");
+      document.getElementById("meterText").textContent = "estimating…";
+      try {
+        const codingMode = document.getElementById("codingMode").checked;
+        const r = await fetch("/api/context/estimate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(promptPayload(codingMode)),
+        });
+        const stats = await r.json();
+        if (!r.ok) throw new Error(stats.error || "estimate failed");
+        if (sequence === estimateSequence) updatePromptMeter(stats);
+      } catch (error) {
+        if (sequence === estimateSequence) document.getElementById("meterText").textContent = "estimate unavailable";
+      }
     }
 
     async function loadTree(p="") {
@@ -451,11 +491,11 @@
 
 
     document.getElementById("memBtn").onclick = async () => {
-      const r = await fetch("/api/memory");
+      const r = await fetch(sessionUrl("/api/memory"));
       const d = await r.json();
       const note = prompt("Current memory:\n\n" + (d.content || "(empty)") + "\n\nAppend a note (or leave blank):");
       if (note && note.trim()) {
-        await fetch("/api/memory", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ append: note.trim() }) });
+        await fetch("/api/memory", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ sessionId: ensureSessionId(), append: note.trim() }) });
         addMsg("system", "Memory updated");
       }
     };
@@ -464,9 +504,14 @@
       if (!name) return;
       const content = prompt("Paste markdown content to import into context pack:");
       if (!content) return;
-      const r = await fetch("/api/context/import", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ name, content }) });
+      const r = await fetch("/api/context/import", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ sessionId: ensureSessionId(), name, content }) });
       const d = await r.json();
       addMsg("system", r.ok ? "Imported " + d.name + " into context pack" : "Import failed");
+    };
+    document.getElementById("contextPack").onchange = async (event) => {
+      includeContext = event.target.checked;
+      await saveSession();
+      refreshCtx();
     };
     document.getElementById("expBtn").onclick = async () => {
       if (!sessionId) { addMsg("system", "No session to export"); return; }
@@ -520,7 +565,7 @@
     };
 
     document.getElementById("newSess").onclick = async () => {
-      sessionId = null; messages = []; contextFiles.clear(); log.innerHTML = "";
+      sessionId = null; messages = []; contextFiles.clear(); includeContext = false; document.getElementById("contextPack").checked = false; log.innerHTML = "";
       addMsg("system", "New session. Local Ollama; prompt context is bounded by the active model.");
       await saveSession();
       await Promise.all([health(), loadTree(""), loadSkills()]);
@@ -546,6 +591,8 @@
       currentRepo = d.root;
       input.value = currentRepo;
       contextFiles.clear();
+      includeContext = false;
+      document.getElementById("contextPack").checked = false;
       await saveSession();
       await Promise.all([health(), loadTree(""), loadSkills()]);
       refreshCtx();
@@ -609,6 +656,7 @@
       } catch (e) { addMsg("system", "Search failed: " + e.message); }
     }
 
+    document.getElementById("codingMode").addEventListener("change", refreshCtx);
     document.getElementById("form").addEventListener("submit", async (ev) => {
       ev.preventDefault();
       const input = document.getElementById("input");
@@ -652,6 +700,7 @@
     async function initialize() {
       if (sessionId) await loadSession(sessionId);
       else await Promise.all([health(), loadTree(""), loadSkills()]);
+      await refreshCtx();
       loadSessions();
       loadTasks();
     }
