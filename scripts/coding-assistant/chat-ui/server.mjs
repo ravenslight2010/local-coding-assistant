@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSy
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID, createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -97,7 +98,27 @@ const flag = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] 
 const HOST = "127.0.0.1";
 const PORT = Number(flag("--port", "7843")) || 7843;
 const OLLAMA = flag("--ollama", "http://127.0.0.1:11434");
-const MODEL = flag("--model", "qwen2.5-coder:7b");
+const MODEL = flag("--model", loadLastModel() || "qwen2.5-coder:7b");
+
+function modelChoicePath() {
+  return path.join(AGENT_ROOT, "config", "model-choice.json");
+}
+function loadLastModel() {
+  try {
+    const j = JSON.parse(readFileSync(modelChoicePath(), "utf8"));
+    return j.Model || j.model || null;
+  } catch { return null; }
+}
+function rememberModel(model) {
+  try {
+    const dir = path.dirname(modelChoicePath());
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const prev = (() => { try { return JSON.parse(readFileSync(modelChoicePath(), "utf8")); } catch { return {}; } })();
+    writeFileSync(modelChoicePath(), JSON.stringify({ ...prev, Model: model, rememberedAt: Date.now() }, null, 2));
+  } catch {}
+}
+rememberModel(MODEL);
+
 const MAX_BODY_BYTES = 1024 * 1024;
 const TOOL_APPROVAL_TTL_MS = 5 * 60 * 1000;
 const MAX_PENDING_TOOL_APPROVALS = 100;
@@ -410,6 +431,29 @@ function listSessions() {
       .slice(0, 40);
   } catch { return []; }
 }
+
+function changedSince(root, sinceMs) {
+  try {
+    const since = new Date(sinceMs || Date.now() - 7 * 86400000).toISOString();
+    const out = execFileSync("git", ["-C", root, "log", `--since=${since}`, "--pretty=format:%h %s", "-n", "12"], { encoding: "utf8", timeout: 4000 });
+    return out.split("\n").filter(Boolean);
+  } catch { return []; }
+}
+
+function contextPack() {
+  const dir = path.join(AGENT_ROOT, "context");
+  const docs = path.join(root, "docs", "coding-assistant", "context");
+  const chunks = [];
+  for (const d of [dir, docs]) {
+    if (!existsSync(d)) continue;
+    for (const f of readdirSync(d)) {
+      if (!f.endsWith(".md")) continue;
+      try { chunks.push({ file: f, text: readFileSync(path.join(d, f), "utf8").slice(0, 4000) }); } catch {}
+    }
+  }
+  return chunks;
+}
+
 function loadSession(id) {
   const p = sessionFile(id);
   if (!p || !existsSync(p)) return null;
@@ -712,6 +756,11 @@ async function handleRequest(req, res) {
     if (body.messages) sess.messages = body.messages;
     if (body.title) sess.title = body.title;
     if (body.includeContext !== undefined) sess.includeContext = body.includeContext === true;
+    if (body.repo) {
+      try { sess.repo = canonicalRepositoryRoot(body.repo); } catch {}
+    }
+    const since = sess.updated || Date.now() - 7 * 86400000;
+    sess.changedSince = changedSince(sess.repo || DEFAULT_ROOT, since);
     saveSession(sess);
     return send(res, 200, sess);
   }
@@ -947,6 +996,14 @@ async function handleRequest(req, res) {
   if (req.method === "GET" && url.pathname === "/api/session/export") {
     const s = loadSession(url.searchParams.get("id") || "");
     if (!s) return send(res, 404, { error: "not found" });
+    const root = s.repo || DEFAULT_ROOT;
+    s.export = {
+      exportedAt: new Date().toISOString(),
+      model: loadLastModel() || MODEL,
+      context: contextPack(),
+      changedSince: changedSince(root, s.updated || Date.now() - 7 * 86400000),
+      memory: existsSync(memoryFile(root)) ? readFileSync(memoryFile(root), "utf8").slice(0, 8000) : "",
+    };
     return send(res, 200, s);
   }
   if (req.method === "POST" && url.pathname === "/api/session/import") {

@@ -7,10 +7,12 @@ set "EXPECTED=fe50348c8ca64d94029a40440ebbb24c58bab31485be663844ef29b5992f3352"
 set "AGENT=C:\runcalc\agent"
 set "SOURCE=%AGENT%\source\%VERSION%"
 set "STARTUP="
+set "MODEL="
 
 :parse
 if "%~1"=="" goto done
 if /i "%~1"=="/startup" set "STARTUP=-AddStartup"
+if /i "%~1"=="/model" ( set "MODEL=%~2" & shift )
 shift
 goto parse
 :done

@@ -63,3 +63,20 @@ The suite builds the canonical ZIP, checks its manifest and hash, and starts its
 - `scripts/ca/` — canonical setup, model selection, and bundle builder
 - `scripts/coding-assistant/` — chat UI, server, and domain skills
 - `docs/coding-assistant/context/` — optional project research context
+
+## Task drop folder
+Drop a JSON file in `C:\runcalc\agent\tasks\` and the assistant picks it up.
+
+Example: [docs/coding-assistant/examples/task-drop.json](docs/coding-assistant/examples/task-drop.json)
+
+## Default repo
+See [docs/coding-assistant/default-repo.md](docs/coding-assistant/default-repo.md).
+
+## Model
+The installer remembers the last model used. Override with:
+
+```bat
+Get-CodeAgent.cmd /model qwen2.5-coder:7b
+```
+
+Or set `CA_MODEL` before running setup.

@@ -6,6 +6,19 @@ function Get-CodingModelChoice {
     [string]$Policy = $(if ($env:CA_MODEL_POLICY) { $env:CA_MODEL_POLICY } else { "speed" })
   )
 
+
+  # Prefer the last model the user actually used, if it is still a known choice.
+  $lastPath = Join-Path $AgentRoot "config\model-choice.json"
+  $lastPath = if ($env:CA_AGENT_ROOT) { Join-Path $env:CA_AGENT_ROOT "config\model-choice.json" } else { "C:\runcalc\agent\config\model-choice.json" }
+  if (Test-Path $lastPath) {
+    try {
+      $last = Get-Content $lastPath -Raw | ConvertFrom-Json
+      if ($last.Model -and $last.remember) {
+        return [pscustomobject]@{ Model = $last.Model; Reason = "last used"; Policy = $Policy }
+      }
+    } catch {}
+  }
+
   $ramGB = 0
   try {
     $bytes = [int64](Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory

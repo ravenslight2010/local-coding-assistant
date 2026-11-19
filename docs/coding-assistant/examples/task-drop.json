@@ -1,0 +1,11 @@
+{
+  "id": "example-bug-001",
+  "type": "bug",
+  "title": "Sync overwrote newer data on wake",
+  "priority": 2,
+  "status": "open",
+  "source": "manual",
+  "body": "Phone woke, old revision was applied over the newer server state. Capture active run id, revision, and whether a background worker was mid-tick.",
+  "repo": "",
+  "created": 0
+}
