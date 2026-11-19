@@ -55,3 +55,8 @@ Tools:
 - shell (approval, opt-in)
 
 Skills: refactor, debug, code-review, multi-file-edit.
+
+## Auto
+- Auto toggle: file edits, creates, and patches apply without a prompt. Shell still asks.
+- Next task: loads the highest-priority open task into the input.
+- Tool actions stay in the audit log either way.

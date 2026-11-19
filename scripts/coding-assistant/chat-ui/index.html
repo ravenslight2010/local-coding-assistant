@@ -65,6 +65,7 @@
     <span class="badge" id="ollama">ollama: …</span>
     <span class="badge" id="modelBadge">model</span>
     <label class="coding-toggle"><input id="codingMode" type="checkbox" /> Code loop</label>
+    <label class="coding-toggle" title="Auto-apply file edits and continue. Shell still asks."><input id="autoMode" type="checkbox" /> Auto</label>
     <label class="coding-toggle" title="Include this repository's imported research context"><input id="contextPack" type="checkbox" /> Pack</label>
     <select id="model" aria-label="Model"></select>
     <button id="newSess" title="New session">New</button>
@@ -74,6 +75,7 @@
     <button id="expBtn" title="Export session">Export</button>
     <button id="wfBtn" title="Workflows">Workflows</button>
     <button id="testBtn" title="Plan tests">Test</button>
+    <button id="nextTask" title="Load next open task">Next task</button>
     <button id="secBtn" title="Secrets">Secrets</button>
     <button id="memSearch" title="Search memory">Recall</button>
   </header>
@@ -228,6 +230,12 @@
           const data = await r.json();
           if (!r.ok) throw new Error(data.error || "tool request rejected");
           approvalId = data.approvalId;
+          const auto = document.getElementById("autoMode") && document.getElementById("autoMode").checked;
+          if (auto && toolObj.tool !== "shell") {
+            status.textContent = "Auto-applying…";
+            allow.click();
+            return;
+          }
           status.textContent = toolObj.tool === "shell"
             ? "Review the command; it runs only after you allow it."
             : "Review the exact file change, then allow or deny.";
@@ -534,7 +542,17 @@
     };
     
     
-    document.getElementById("testBtn").onclick = async () => {
+    
+    document.getElementById("nextTask").onclick = async () => {
+      const r = await fetch("/api/tasks/next", { method: "POST" });
+      const d = await r.json();
+      if (!d.task) { addMsg("system", "No open tasks."); return; }
+      const t = d.task;
+      const prompt = "Process task " + t.id + ": " + t.title + "\nType: " + (t.type || "task") + "\n" + (t.body || "");
+      document.getElementById("input").value = prompt;
+      addMsg("system", "Next task loaded: " + t.title);
+    };
+document.getElementById("testBtn").onclick = async () => {
       const hint = prompt("What changed? (ui, import, api, or leave blank)") || "";
       const r = await fetch("/api/test/plan", {
         method: "POST",

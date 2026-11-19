@@ -172,7 +172,7 @@ Write tools (approval required):
 \`\`\`tool
 {"tool":"patch","files":[{"path":"a","old":"...","new":"..."},{"path":"b","content":"new file"}]}
 \`\`\`
-Inspect before editing. Prefer the smallest complete patch. Update the covering test in the same change. One tool block per response. Never claim a test passed without its output. Do not read secret files.`;
+Inspect before editing. Prefer the smallest complete patch. If Auto is on, file tools apply without a prompt and you should continue to the next step (read result, edit, test) until done or blocked. Update the covering test in the same change. One tool block per response. Never claim a test passed without its output. Do not read secret files.`;
 
 function safeResolve(root, rel) {
   const value = String(rel || "").replace(/\\/g, "/");
@@ -1200,6 +1200,14 @@ async function handleRequest(req, res) {
     const root = rootForSession(body.sessionId);
     const discovery = discoverTests(root);
     return send(res, 200, { discovery, plan: planFor(body.hint || "", discovery) });
+  }
+
+
+  if (req.method === "POST" && url.pathname === "/api/tasks/next") {
+    const open = listTasks().filter((t) => t.status === "open");
+    if (!open.length) return send(res, 200, { task: null });
+    const task = loadTask(open[0].id);
+    return send(res, 200, { task });
   }
 
 if (req.method === "GET" && url.pathname === "/api/health") {
