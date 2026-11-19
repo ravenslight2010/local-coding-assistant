@@ -1,3 +1,5 @@
+> **Historical, unqualified reference:** This describes the Production Run Calculator, not the Local Coding Assistant. Its route and fix claims have not been revalidated against current PRC `main`; verify every claim against the selected repository before using it. This document is not automatically loaded into chat prompts.
+
 # Threat Model
 
 ## Project Overview

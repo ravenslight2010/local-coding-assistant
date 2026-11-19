@@ -30,15 +30,10 @@ const AGENT_ROOT = process.env.CA_AGENT_ROOT || path.join(path.dirname(DEFAULT_R
 const SESSIONS_DIR = path.join(AGENT_ROOT, "sessions");
 const TASKS_DIR = path.join(AGENT_ROOT, "tasks");
 const TASKS_DONE = path.join(TASKS_DIR, "done");
-const CONTEXT_DIR = path.join(AGENT_ROOT, "context");
-const MEMORY_FILE = path.join(AGENT_ROOT, "config", "MEMORY.md");
 const AUDIT_FILE = path.join(AGENT_ROOT, "audit", "tool-actions.json");
 if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true });
 if (!existsSync(TASKS_DIR)) mkdirSync(TASKS_DIR, { recursive: true });
 if (!existsSync(TASKS_DONE)) mkdirSync(TASKS_DONE, { recursive: true });
-if (!existsSync(CONTEXT_DIR)) mkdirSync(CONTEXT_DIR, { recursive: true });
-if (!existsSync(path.dirname(MEMORY_FILE))) mkdirSync(path.dirname(MEMORY_FILE), { recursive: true });
-if (!existsSync(MEMORY_FILE)) writeFileSync(MEMORY_FILE, "# Project Memory\n\n", "utf8");
 
 function secretsPath() {
   return path.join(AGENT_ROOT, "config", "secrets.json");
@@ -108,6 +103,7 @@ const TOOL_APPROVAL_TTL_MS = 5 * 60 * 1000;
 const MAX_PENDING_TOOL_APPROVALS = 100;
 const MAX_AUDIT_RECORDS = Math.min(200, Math.max(1, Number(process.env.CA_AUDIT_LIMIT) || 200));
 const SHELL_TIMEOUT_MS = Math.min(120000, Math.max(1, Number(process.env.CA_SHELL_TIMEOUT_MS) || 120000));
+const PROMPT_TOKEN_BUDGET = Math.min(100000, Math.max(512, Number(process.env.CA_PROMPT_TOKEN_BUDGET) || 12000));
 const pendingToolApprovals = new Map();
 const allowedOrigins = new Set([`http://${HOST}:${PORT}`, `http://localhost:${PORT}`]);
 const allowedHosts = new Set([`${HOST}:${PORT}`, `localhost:${PORT}`]);
@@ -476,22 +472,33 @@ function saveTask(t) {
 }
 
 
-function readMemory() {
-  try { return readFileSync(MEMORY_FILE, "utf8"); } catch { return ""; }
+function repositoryStateDir(root) {
+  return path.join(AGENT_ROOT, "repositories", sha256(realpathSync(root)));
 }
-function appendMemory(line) {
-  const cur = readMemory();
-  writeFileSync(MEMORY_FILE, cur.trimEnd() + "\n- " + line + "\n", "utf8");
+function memoryFile(root) {
+  return path.join(repositoryStateDir(root), "config", "MEMORY.md");
 }
-function listContext() {
+function contextDir(root) {
+  return path.join(repositoryStateDir(root), "context");
+}
+function readMemory(root) {
+  try { return readFileSync(memoryFile(root), "utf8"); } catch { return ""; }
+}
+function appendMemory(root, line) {
+  const file = memoryFile(root);
+  mkdirSync(path.dirname(file), { recursive: true });
+  const cur = readMemory(root);
+  writeFileSync(file, cur.trimEnd() + "\n- " + line + "\n", "utf8");
+}
+function listContext(root) {
   try {
-    return readdirSync(CONTEXT_DIR)
+    return readdirSync(contextDir(root))
       .filter((f) => f.endsWith(".md") || f.endsWith(".txt"))
-      .map((f) => ({ name: f, path: path.join(CONTEXT_DIR, f) }));
+      .map((f) => ({ name: f, path: path.join(contextDir(root), f) }));
   } catch { return []; }
 }
-function loadContextPack() {
-  const files = listContext();
+function loadContextPack(root) {
+  const files = listContext(root);
   let blob = "";
   for (const f of files.slice(0, 20)) {
     try {
@@ -502,13 +509,142 @@ function loadContextPack() {
   return blob;
 }
 
+function estimatePromptTokens(text) {
+  return Math.ceil(Buffer.byteLength(String(text || ""), "utf8") / 4);
+}
+
+function fitPromptText(text, tokenBudget) {
+  const marker = "\n[... truncated to fit the total prompt budget ...]";
+  if (tokenBudget <= estimatePromptTokens(marker)) return "";
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (estimatePromptTokens(text.slice(0, middle) + marker) <= tokenBudget) low = middle;
+    else high = middle - 1;
+  }
+  return text.slice(0, low) + marker;
+}
+
+function normalizePromptMessage(message) {
+  if (!message || typeof message !== "object" || Array.isArray(message)) return null;
+  const role = message.role === "assistant" ? "assistant" : "user";
+  let content = typeof message.content === "string" ? message.content : String(message.content || "");
+  if (Array.isArray(message.attachments)) {
+    for (const attachment of message.attachments.slice(0, 10)) {
+      const text = typeof attachment === "string"
+        ? attachment
+        : String(attachment?.text || attachment?.content || "");
+      if (!text) continue;
+      const name = typeof attachment === "object" && typeof attachment.name === "string"
+        ? attachment.name.slice(0, 120)
+        : "attachment";
+      content += `\n\n--- ATTACHMENT ${name} ---\n${text}`;
+    }
+  }
+  return content ? { role, content } : null;
+}
+
+function buildChatBody(payload, root) {
+  const stats = {
+    budgetTokens: PROMPT_TOKEN_BUDGET,
+    estimatedTokens: 0,
+    truncated: false,
+    truncatedParts: [],
+    parts: { system: 0, memory: 0, contextPack: 0, skills: 0, files: 0, history: 0 },
+  };
+  let remaining = PROMPT_TOKEN_BUDGET;
+  function take(part, text, required = false) {
+    if (!text) return "";
+    const tokens = estimatePromptTokens(text);
+    if (tokens <= remaining) {
+      remaining -= tokens;
+      stats.parts[part] += tokens;
+      return text;
+    }
+    if (required) {
+      const error = new Error("prompt budget is too small for the required instructions");
+      error.statusCode = 413;
+      throw error;
+    }
+    stats.truncated = true;
+    if (!stats.truncatedParts.includes(part)) stats.truncatedParts.push(part);
+    const fitted = fitPromptText(text, remaining);
+    const fittedTokens = estimatePromptTokens(fitted);
+    remaining -= fittedTokens;
+    stats.parts[part] += fittedTokens;
+    return fitted;
+  }
+
+  let sys = SYSTEM + `\nCurrent repo: ${root}`;
+  if (payload.codingMode === true) sys += `\n\n${CODING_WORKFLOW}`;
+  sys = take("system", sys, true);
+
+  const history = (Array.isArray(payload.messages) ? payload.messages : [])
+    .slice(-100)
+    .map(normalizePromptMessage)
+    .filter(Boolean);
+  const latest = history.pop() || null;
+  const fittedLatest = latest ? take("history", latest.content) : "";
+
+  const memory = readMemory(root);
+  if (memory.trim()) sys += take("memory", `\n\nProject memory:\n${memory}`);
+
+  if (payload.includeContext === true) {
+    const pack = loadContextPack(root);
+    if (pack) sys += take("contextPack", `\n\nResearch context pack:${pack}`);
+  }
+
+  const skillSlugs = Array.isArray(payload.skills) ? payload.skills : [];
+  let skillBlob = "";
+  for (const slug of skillSlugs.slice(0, 3)) {
+    const skill = loadSkill(root, String(slug));
+    if (skill) skillBlob += `\n\n--- SKILL ${skill.slug} ---\n${skill.content}`;
+  }
+  if (skillBlob) sys += take("skills", `\n\nActive skills:${skillBlob}`);
+
+  const contextFiles = Array.isArray(payload.contextFiles) ? payload.contextFiles : [];
+  let contextBlob = "";
+  for (const rel of contextFiles.slice(0, 6)) {
+    const abs = safeResolve(root, rel);
+    if (abs && isProtectedRepositoryPath(path.relative(root, abs))) {
+      const error = new Error("secret files are not available as chat context");
+      error.statusCode = 403;
+      throw error;
+    }
+    if (abs && existsSync(abs) && statSync(abs).isFile() && statSync(abs).size < 120000) {
+      contextBlob += `\n\n--- FILE ${rel} ---\n${readFileSync(abs, "utf8").slice(0, 80000)}`;
+    }
+  }
+  if (contextBlob) sys += take("files", `\n\nFile context:${contextBlob}`);
+
+  const older = [];
+  for (let index = history.length - 1; index >= 0; index--) {
+    const message = history[index];
+    const content = take("history", message.content);
+    if (content) older.unshift({ role: message.role, content });
+  }
+  const messages = [{ role: "system", content: sys }, ...older];
+  if (latest && fittedLatest) messages.push({ role: latest.role, content: fittedLatest });
+  stats.estimatedTokens = PROMPT_TOKEN_BUDGET - remaining;
+  return {
+    body: {
+      model: payload.model || readPrefs().lastModel || MODEL,
+      messages,
+      temperature: 0.2,
+      stream: payload.stream === true,
+    },
+    stats,
+  };
+}
+
 const publicIndex = path.join(__dirname, "index.html");
 
 const server = http.createServer((req, res) => {
   handleRequest(req, res).catch((error) => {
     if (res.headersSent) return res.destroy();
     const status = Number.isInteger(error.statusCode) ? error.statusCode : 400;
-    const message = status === 413 ? "request body too large" : status === 409 ? error.message : "invalid request";
+    const message = error.statusCode ? error.message : "invalid request";
     return send(res, status, { error: message });
   });
 });
@@ -575,6 +711,7 @@ async function handleRequest(req, res) {
     const sess = loadSession(id) || { id, title: body.title || "New session", messages: [], repo: DEFAULT_ROOT };
     if (body.messages) sess.messages = body.messages;
     if (body.title) sess.title = body.title;
+    if (body.includeContext !== undefined) sess.includeContext = body.includeContext === true;
     saveSession(sess);
     return send(res, 200, sess);
   }
@@ -779,23 +916,32 @@ async function handleRequest(req, res) {
 
 
   if (req.method === "GET" && url.pathname === "/api/memory") {
-    return send(res, 200, { content: readMemory() });
+    const root = rootForSession(url.searchParams.get("sessionId"));
+    return send(res, 200, { content: readMemory(root) });
   }
   if (req.method === "POST" && url.pathname === "/api/memory") {
     const body = JSON.parse(await readBody(req) || "{}");
-    if (body.append) appendMemory(String(body.append));
-    if (body.replace) writeFileSync(MEMORY_FILE, String(body.replace), "utf8");
-    return send(res, 200, { ok: true, content: readMemory() });
+    const root = rootForSession(body.sessionId);
+    if (body.append) appendMemory(root, String(body.append));
+    if (body.replace) {
+      const file = memoryFile(root);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, String(body.replace), "utf8");
+    }
+    return send(res, 200, { ok: true, content: readMemory(root) });
   }
   if (req.method === "GET" && url.pathname === "/api/context") {
-    return send(res, 200, { files: listContext().map((f) => f.name) });
+    const root = rootForSession(url.searchParams.get("sessionId"));
+    return send(res, 200, { files: listContext(root).map((f) => f.name) });
   }
   if (req.method === "POST" && url.pathname === "/api/context/import") {
     const body = JSON.parse(await readBody(req) || "{}");
+    const root = rootForSession(body.sessionId);
     const name = String(body.name || "imported.md").replace(/[^a-zA-Z0-9._-]/g, "_");
     const content = String(body.content || "");
     if (!content) return send(res, 400, { error: "empty" });
-    writeFileSync(path.join(CONTEXT_DIR, name), content, "utf8");
+    mkdirSync(contextDir(root), { recursive: true });
+    writeFileSync(path.join(contextDir(root), name), content, "utf8");
     return send(res, 200, { ok: true, name });
   }
   if (req.method === "GET" && url.pathname === "/api/session/export") {
@@ -857,45 +1003,19 @@ if (req.method === "GET" && url.pathname === "/api/health") {
     return send(res, 200, { path: url.searchParams.get("path"), content: readFileSync(abs, "utf8") });
   }
 
+  if (req.method === "POST" && url.pathname === "/api/context/estimate") {
+    const payload = JSON.parse(await readBody(req) || "{}");
+    const root = rootForSession(payload.sessionId);
+    return send(res, 200, buildChatBody(payload, root).stats);
+  }
+
   if (req.method === "POST" && url.pathname === "/api/chat") {
     const payload = JSON.parse(await readBody(req) || "{}");
     const root = rootForSession(payload.sessionId);
-    const messages = Array.isArray(payload.messages) ? payload.messages : [];
-    const model = payload.model || readPrefs().lastModel || MODEL;
-    const stream = payload.stream === true;
-    const contextFiles = Array.isArray(payload.contextFiles) ? payload.contextFiles : [];
-    const skillSlugs = Array.isArray(payload.skills) ? payload.skills : [];
-    const codingMode = payload.codingMode === true;
-    let skillBlob = "";
-    for (const slug of skillSlugs.slice(0, 3)) {
-      const sk = loadSkill(root, String(slug));
-      if (sk) skillBlob += `\n\n--- SKILL ${sk.slug} ---\n${sk.content}`;
-    }
-    let contextBlob = "";
-    for (const rel of contextFiles.slice(0, 6)) {
-      const abs = safeResolve(root, rel);
-      if (abs && isProtectedRepositoryPath(path.relative(root, abs))) {
-        return send(res, 403, { error: "secret files are not available as chat context" });
-      }
-      if (abs && existsSync(abs) && statSync(abs).isFile() && statSync(abs).size < 120000) {
-        contextBlob += `\n\n--- FILE ${rel} ---\n${readFileSync(abs, "utf8").slice(0, 80000)}`;
-      }
-    }
-    let sys = SYSTEM + `\nCurrent repo: ${root}`;
-    const mem = readMemory();
-    if (mem.trim()) sys += `\n\nProject memory:\n${mem.slice(0, 8000)}`;
-    const pack = loadContextPack();
-    if (pack) sys += `\n\nResearch context pack:${pack}`;
-    if (skillBlob) sys += `\n\nActive skills:${skillBlob}`;
-    if (contextBlob) sys += `\n\nFile context:${contextBlob}`;
-    if (codingMode) sys += `\n\n${CODING_WORKFLOW}`;
-
-    const body = {
-      model,
-      messages: [{ role: "system", content: sys }, ...messages],
-      temperature: 0.2,
-      stream,
-    };
+    const { body, stats } = buildChatBody(payload, root);
+    res.setHeader("X-Prompt-Estimated-Tokens", String(stats.estimatedTokens));
+    res.setHeader("X-Prompt-Budget-Tokens", String(stats.budgetTokens));
+    res.setHeader("X-Prompt-Truncated", String(stats.truncated));
 
     const upstreamController = new AbortController();
     let upstreamTimedOut = false;
@@ -919,7 +1039,7 @@ if (req.method === "GET" && url.pathname === "/api/health") {
         const t = await r.text();
         return send(res, 502, { error: "ollama", status: r.status, body: t.slice(0, 500) });
       }
-      if (stream && r.body) {
+      if (body.stream && r.body) {
         res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
         const reader = r.body.getReader();
         const dec = new TextDecoder();
@@ -936,7 +1056,7 @@ if (req.method === "GET" && url.pathname === "/api/health") {
       }
       const data = await r.json();
       const content = data.choices?.[0]?.message?.content ?? "";
-      return send(res, 200, { content, model });
+      return send(res, 200, { content, model: body.model, prompt: stats });
     } catch (e) {
       if (upstreamTimedOut && !res.headersSent && !res.destroyed) {
         return send(res, 504, { error: "ollama timed out" });

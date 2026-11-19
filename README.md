@@ -48,6 +48,10 @@ Use **Repo → Select** in the browser to set the current session's repository. 
 
 Repository path checks are segment-aware: `.github` and filenames containing `..` are allowed, while traversal and `.git` metadata are blocked. Credential-like files are excluded from the file browser, coding reads/search, selected chat context, and edits.
 
+Memory and imported research context are stored separately for each canonical repository under `agent/repositories/<repository-hash>/`. The research pack is off by default and is included only when **Pack** is enabled for that session. Existing server-wide memory/context files are not automatically migrated or injected into repositories.
+
+One total prompt budget (12,000 estimated tokens by default, configurable with `CA_PROMPT_TOKEN_BUDGET`) covers instructions, memory, the opt-in pack, skills, selected files, attachments, and history. The latest request is prioritized; oversized optional content is truncated and reported. The browser meter calls the same server prompt builder and therefore uses actual content rather than selected filenames. The `~` count is a consistent UTF-8 byte-based estimate, not an exact model-specific tokenizer count.
+
 ## Verification
 ```bash
 node --test scripts/coding-assistant/tests/*.test.mjs
