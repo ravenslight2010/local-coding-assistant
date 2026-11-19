@@ -42,6 +42,9 @@
     button:focus-visible,select:focus-visible,textarea:focus-visible,input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
     .coding-toggle { display:flex; align-items:center; gap:0.35rem; color:var(--text); font-size:0.8rem; white-space:nowrap; }
     .coding-toggle input { accent-color:var(--accent); }
+    .repo-picker { display:flex; gap:0.3rem; margin-bottom:0.45rem; }
+    .repo-picker input { min-width:0; flex:1; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); padding:0.35rem; font:inherit; font-size:0.72rem; }
+    .repo-picker button { padding:0.3rem 0.45rem; font-size:0.72rem; }
     @media (max-width:720px) {
       main { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(150px,32vh) minmax(0,1fr); }
       aside { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); border-right:0; border-bottom:1px solid var(--border); }
@@ -85,6 +88,10 @@
       </section>
       <section style="flex:1">
         <h2>Repo</h2>
+        <div class="repo-picker">
+          <input id="repoPath" aria-label="Repository path" placeholder="Path to package.json or .git repository" />
+          <button id="selectRepo" type="button">Select</button>
+        </div>
         <div id="tree"></div>
       </section>
     </aside>
@@ -115,6 +122,18 @@
     let searchEnabled = false;
     let currentRepo = "";
 
+    function ensureSessionId() {
+      if (!sessionId) sessionId = Math.random().toString(36).slice(2, 10);
+      localStorage.setItem("ca_session", sessionId);
+      return sessionId;
+    }
+
+    function sessionUrl(pathname) {
+      const url = new URL(pathname, window.location.origin);
+      if (sessionId) url.searchParams.set("sessionId", sessionId);
+      return url.pathname + url.search;
+    }
+
     function addMsg(role, text) {
       const el = document.createElement("div");
       el.className = "msg " + role;
@@ -125,6 +144,7 @@
     }
 
     function addToolCard(toolObj, waitForDecision = false) {
+      const approvalSessionId = ensureSessionId();
       let resolveDecision;
       const decision = waitForDecision ? new Promise((resolve) => { resolveDecision = resolve; }) : null;
       const card = document.createElement("div");
@@ -156,7 +176,7 @@
       allow.onclick = async () => {
         allow.disabled = true;
         try {
-          const r = await fetch("/api/tool/apply", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ approvalId }) });
+          const r = await fetch("/api/tool/apply", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ approvalId, sessionId: approvalSessionId }) });
           const d = await r.json();
           addMsg("system", r.ok ? "Applied: " + JSON.stringify(d) : "Failed: " + (d.error || ""));
           card.remove();
@@ -175,7 +195,7 @@
       card.appendChild(row);
       log.appendChild(card);
       log.scrollTop = log.scrollHeight;
-      fetch("/api/tool/prepare", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ tool: toolObj }) })
+      fetch("/api/tool/prepare", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ tool: toolObj, sessionId: approvalSessionId }) })
         .then(async (r) => {
           const data = await r.json();
           if (!r.ok) throw new Error(data.error || "tool request rejected");
@@ -210,6 +230,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            sessionId: ensureSessionId(),
             model: modelSel.value,
             messages,
             contextFiles: [...contextFiles],
@@ -259,7 +280,7 @@
           const r = await fetch("/api/tool/read", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tool }),
+            body: JSON.stringify({ tool, sessionId: ensureSessionId() }),
           });
           const result = await r.json();
           addMsg("system", r.ok ? `Repository ${tool.tool} complete.` : `Repository ${tool.tool} failed: ${result.error || r.status}`);
@@ -361,13 +382,17 @@
       sessionId = s.id;
       localStorage.setItem("ca_session", id);
       messages = s.messages || [];
+      currentRepo = s.repo || "";
+      document.getElementById("repoPath").value = currentRepo;
+      contextFiles.clear();
       log.innerHTML = "";
       for (const m of messages) addMsg(m.role, m.content);
+      refreshCtx();
+      await Promise.all([health(), loadTree(""), loadSkills()]);
       loadSessions();
     }
     async function saveSession() {
-      if (!sessionId) sessionId = Math.random().toString(36).slice(2, 10);
-      localStorage.setItem("ca_session", sessionId);
+      ensureSessionId();
       await fetch("/api/sessions", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ id:sessionId, title: messages.find(m=>m.role==="user")?.content?.slice(0,40) || "Session", messages }) });
       loadSessions();
     }
@@ -381,7 +406,7 @@
     }
 
     async function loadTree(p="") {
-      const r = await fetch("/api/tree?path=" + encodeURIComponent(p));
+      const r = await fetch(sessionUrl("/api/tree?path=" + encodeURIComponent(p)));
       const data = await r.json();
       tree.innerHTML = "";
       if (p) {
@@ -408,7 +433,7 @@
 
     async function loadSkills() {
       const el = document.getElementById("skills");
-      const r = await fetch("/api/skills");
+      const r = await fetch(sessionUrl("/api/skills"));
       const data = await r.json();
       el.innerHTML = "";
       for (const s of (data.skills || []).slice(0, 60)) {
@@ -430,7 +455,7 @@
       const d = await r.json();
       const note = prompt("Current memory:\n\n" + (d.content || "(empty)") + "\n\nAppend a note (or leave blank):");
       if (note && note.trim()) {
-        await fetch("/api/memory", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ append: note.trim() }) });
+        await fetch("/api/memory", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ append: note.trim() }) });
         addMsg("system", "Memory updated");
       }
     };
@@ -439,7 +464,7 @@
       if (!name) return;
       const content = prompt("Paste markdown content to import into context pack:");
       if (!content) return;
-      const r = await fetch("/api/context/import", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name, content }) });
+      const r = await fetch("/api/context/import", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ name, content }) });
       const d = await r.json();
       addMsg("system", r.ok ? "Imported " + d.name + " into context pack" : "Import failed");
     };
@@ -455,9 +480,10 @@
     };
 
     async function health() {
-      const r = await fetch("/api/health");
+      const r = await fetch(sessionUrl("/api/health"));
       const h = await r.json();
       currentRepo = h.repoRoot || "";
+      document.getElementById("repoPath").value = currentRepo;
       if (!h.shellAllowed) {
         addMsg("system", "Code loop can inspect files and propose approved edits. To run tests, launch with CA_ALLOW_SHELL=1; each command still needs your approval.");
       }
@@ -480,7 +506,7 @@
 
     document.getElementById("searchBadge").onclick = async () => {
       if (!searchEnabled) {
-        const response = await fetch("/api/diagnostics");
+        const response = await fetch(sessionUrl("/api/diagnostics"));
         const diagnostics = await response.json();
         if (!diagnostics.searchAllowed) {
           addMsg("system", "Optional search is disabled. Restart the server with CA_ALLOW_SEARCH=1 to enable it.");
@@ -493,14 +519,45 @@
       b.className = searchEnabled ? "badge ok" : "badge";
     };
 
-    document.getElementById("newSess").onclick = () => {
-      sessionId = null; messages = []; log.innerHTML = "";
-      addMsg("system", "New session. Local Ollama — no token limits.");
-      saveSession();
+    document.getElementById("newSess").onclick = async () => {
+      sessionId = null; messages = []; contextFiles.clear(); log.innerHTML = "";
+      addMsg("system", "New session. Local Ollama; prompt context is bounded by the active model.");
+      await saveSession();
+      await Promise.all([health(), loadTree(""), loadSkills()]);
+      refreshCtx();
     };
 
+    async function selectRepository() {
+      const input = document.getElementById("repoPath");
+      const selected = input.value.trim();
+      if (!selected) return;
+      ensureSessionId();
+      const r = await fetch("/api/repo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, path: selected }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        input.value = currentRepo;
+        addMsg("system", "Repository selection failed: " + (d.error || r.status));
+        return;
+      }
+      currentRepo = d.root;
+      input.value = currentRepo;
+      contextFiles.clear();
+      await saveSession();
+      await Promise.all([health(), loadTree(""), loadSkills()]);
+      refreshCtx();
+      addMsg("system", "Session repository: " + currentRepo);
+    }
+    document.getElementById("selectRepo").onclick = selectRepository;
+    document.getElementById("repoPath").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); selectRepository(); }
+    });
+
     document.getElementById("diag").onclick = async () => {
-      const r = await fetch("/api/diagnostics");
+      const r = await fetch(sessionUrl("/api/diagnostics"));
       const d = await r.json();
       const blob = new Blob([JSON.stringify(d, null, 2)], { type: "application/json" });
       const a = document.createElement("a");
@@ -592,14 +649,14 @@
     });
 
     addMsg("system", "Local coding assistant — Ollama only. Code loop can inspect files, propose edits, and continue after approved tools.");
-    health();
-    loadTree("");
-    loadSkills();
-    loadSessions();
-    loadTasks();
+    async function initialize() {
+      if (sessionId) await loadSession(sessionId);
+      else await Promise.all([health(), loadTree(""), loadSkills()]);
+      loadSessions();
+      loadTasks();
+    }
+    initialize();
     setInterval(loadTasks, 15000);
-    loadTasks();
-    if (sessionId) loadSession(sessionId);
   </script>
 </body>
 </html>
