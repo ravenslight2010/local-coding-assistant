@@ -10,7 +10,7 @@ A local coding assistant that runs on your machine with Ollama. Inference requir
 - Local checkout selection for coding tasks
 
 ## Coding loop
-Turn on **Code loop** to let the assistant search and read relevant repository files, propose focused edits, then use approved command results to continue. Repository reads are bounded and skip dependency/build folders and credential-like files. File edits and shell commands require approval; shell commands are disabled unless the server is launched with `CA_ALLOW_SHELL=1`.
+Turn on **Code loop** to let the assistant search and read relevant repository files, propose focused edits, then use approved command results to continue. Repository reads are bounded and skip dependency/build folders and credential-like files. File edits and shell commands require approval; shell commands are disabled unless the server is launched with `CA_ALLOW_SHELL=1`. Edit approvals are bound to the prepared session, repository, and file SHA-256; stale approvals return `409` without overwriting newer content. Approved edits use atomic replacement. Up to 200 outcome-only edit/command audit records are kept in `agent/audit/tool-actions.json`; source changes and command text are not recorded. Chat streaming honors client disconnects and response backpressure.
 
 ## Quick start (Windows)
 1. Download and double-click [Get-CodeAgent.cmd](https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/Get-CodeAgent.cmd).
