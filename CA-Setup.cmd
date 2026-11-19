@@ -1,23 +1,27 @@
 @echo off
 setlocal EnableExtensions
 title Code Agent Setup
-color 0B
 
 set "AGENT=C:\runcalc\agent"
+set "REPO=%~dp0"
 set "SETUP=%~dp0scripts\ca\setup.ps1"
-set "REPAIR="
 set "STARTUP="
+set "LAUNCH=-LaunchChat"
 
 :parse
 if "%~1"=="" goto done
-if /i "%~1"=="/repair" set "REPAIR=-Repair"
 if /i "%~1"=="/startup" set "STARTUP=-AddStartup"
+if /i "%~1"=="/nolaunch" set "LAUNCH=-NoLaunch"
 shift
 goto parse
 :done
 
-mkdir "%AGENT%" 2>nul
-mkdir "%AGENT%\logs" 2>nul
+if not exist "%SETUP%" (
+  echo Missing %SETUP%
+  echo Extract the full Code Agent bundle and run this file from its root.
+  pause
+  exit /b 1
+)
 
 net session >nul 2>&1
 if not %errorlevel%==0 (
@@ -26,32 +30,11 @@ if not %errorlevel%==0 (
   exit /b
 )
 
-if not exist "%SETUP%" (
-  echo Missing %SETUP%
-  echo Run this from the repo root after checkout.
-  pause
-  exit /b 1
-)
-
-set "REPO=%~dp0"
-if "%REPO:~-1%"=="\" set "REPO=%REPO:~0,-1%"
-
-if not exist "%REPO%\package.json" (
-  echo package.json not found next to CA-Setup.cmd
-  echo REPO=%REPO%
-  pause
-  exit /b 1
-)
-
-echo Repo:    %REPO%
-echo Agent:   %AGENT%
-echo Repair:  %REPAIR%
-echo Startup: %STARTUP%
+echo Source: %REPO%
+echo Agent:  %AGENT%
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SETUP%" -RepoRoot "%REPO%" -AgentRoot "%AGENT%" %STARTUP% %LAUNCH%
+set "EC=%ERRORLEVEL%"
 echo.
-
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SETUP%" -RepoRoot "%REPO%" %REPAIR% %STARTUP% -LaunchChat
-set EC=%ERRORLEVEL%
-echo.
-if %EC%==0 (echo Setup OK) else (echo Setup FAILED — see %AGENT%\logs)
+if %EC%==0 (echo Setup OK) else (echo Setup FAILED - see %AGENT%\logs)
 pause
 exit /b %EC%
