@@ -45,3 +45,13 @@ Security and vulnerability checks are part of the test plan:
 - Error leakage and headers
 
 Workflow: `security-audit`. Skills: `security-testing`, `vuln-scan`, `no-hardcoded-secrets`, `ci-security-review`.
+
+## Coding
+Tools:
+- search, read, outline (symbols in a file)
+- edit (exact old/new, approval)
+- create (new file, approval)
+- patch (up to 8 related files in one approval)
+- shell (approval, opt-in)
+
+Skills: refactor, debug, code-review, multi-file-edit.
