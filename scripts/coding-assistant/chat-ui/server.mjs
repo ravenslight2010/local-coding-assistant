@@ -4,10 +4,10 @@
  * Binds 127.0.0.1. Optional search. Sessions, tools with approval, gold-set helper.
  */
 import http from "node:http";
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, appendFileSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, appendFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +32,7 @@ const TASKS_DIR = path.join(AGENT_ROOT, "tasks");
 const TASKS_DONE = path.join(TASKS_DIR, "done");
 const CONTEXT_DIR = path.join(AGENT_ROOT, "context");
 const MEMORY_FILE = path.join(AGENT_ROOT, "config", "MEMORY.md");
+const AUDIT_FILE = path.join(AGENT_ROOT, "audit", "tool-actions.json");
 if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true });
 if (!existsSync(TASKS_DIR)) mkdirSync(TASKS_DIR, { recursive: true });
 if (!existsSync(TASKS_DONE)) mkdirSync(TASKS_DONE, { recursive: true });
@@ -105,6 +106,8 @@ const MODEL = flag("--model", "qwen2.5-coder:7b");
 const MAX_BODY_BYTES = 1024 * 1024;
 const TOOL_APPROVAL_TTL_MS = 5 * 60 * 1000;
 const MAX_PENDING_TOOL_APPROVALS = 100;
+const MAX_AUDIT_RECORDS = Math.min(200, Math.max(1, Number(process.env.CA_AUDIT_LIMIT) || 200));
+const SHELL_TIMEOUT_MS = Math.min(120000, Math.max(1, Number(process.env.CA_SHELL_TIMEOUT_MS) || 120000));
 const pendingToolApprovals = new Map();
 const allowedOrigins = new Set([`http://${HOST}:${PORT}`, `http://localhost:${PORT}`]);
 const allowedHosts = new Set([`${HOST}:${PORT}`, `localhost:${PORT}`]);
@@ -281,6 +284,52 @@ function readCodingTool(root, tool) {
   return { status: 400, body: { error: "unsupported read-only tool" } };
 }
 
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function atomicWriteFile(abs, content, mode = 0o600) {
+  const temp = path.join(path.dirname(abs), `.${path.basename(abs)}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temp, content, { encoding: "utf8", mode, flag: "wx" });
+    renameSync(temp, abs);
+  } finally {
+    if (existsSync(temp)) unlinkSync(temp);
+  }
+}
+
+function recordToolAudit(approval, result) {
+  const record = {
+    at: new Date().toISOString(),
+    approvalId: approval.id,
+    sessionId: approval.sessionId || null,
+    kind: approval.tool.tool,
+    rootHash: sha256(approval.root),
+    outcome: result.outcome,
+  };
+  if (approval.tool.tool === "edit") record.path = approval.tool.path.slice(0, 300);
+  if (approval.tool.tool === "shell") {
+    record.commandHash = sha256(approval.tool.command);
+    record.commandBytes = Buffer.byteLength(approval.tool.command);
+  }
+  for (const key of ["reason", "code", "timedOut", "truncated"]) {
+    if (result[key] !== undefined) record[key] = result[key];
+  }
+  try {
+    let records = [];
+    if (existsSync(AUDIT_FILE)) {
+      records = JSON.parse(readFileSync(AUDIT_FILE, "utf8"));
+      if (!Array.isArray(records)) return false;
+    }
+    records.push(record);
+    mkdirSync(path.dirname(AUDIT_FILE), { recursive: true });
+    atomicWriteFile(AUDIT_FILE, JSON.stringify(records.slice(-MAX_AUDIT_RECORDS), null, 2) + "\n");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function pruneToolApprovals() {
   const now = Date.now();
   for (const [id, approval] of pendingToolApprovals) {
@@ -300,6 +349,23 @@ function send(res, status, body, type = "application/json; charset=utf-8") {
   res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
   res.end(data);
 }
+function writeStreamChunk(res, chunk) {
+  if (res.destroyed || res.writableEnded) return Promise.resolve(false);
+  if (res.write(chunk)) return Promise.resolve(true);
+  if (res.destroyed || res.writableEnded) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const done = (value) => {
+      res.off("drain", onDrain);
+      res.off("close", onClose);
+      resolve(value);
+    };
+    const onDrain = () => done(true);
+    const onClose = () => done(false);
+    res.once("drain", onDrain);
+    res.once("close", onClose);
+  });
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -574,11 +640,19 @@ async function handleRequest(req, res) {
     pruneToolApprovals();
     if (pendingToolApprovals.size >= MAX_PENDING_TOOL_APPROVALS) return send(res, 429, { error: "too many pending approvals" });
     const approvalId = randomUUID();
-    pendingToolApprovals.set(approvalId, {
+    const approval = {
+      id: approvalId,
+      sessionId: body.sessionId || null,
       tool,
       root: realpathSync(root),
       expiresAt: Date.now() + TOOL_APPROVAL_TTL_MS,
-    });
+    };
+    if (tool.tool === "edit") {
+      const abs = safeResolve(root, tool.path);
+      if (!abs) return send(res, 400, { error: "invalid tool request" });
+      approval.fileSha256 = sha256(readFileSync(abs, "utf8"));
+    }
+    pendingToolApprovals.set(approvalId, approval);
     return send(res, 200, { approvalId });
   }
 
@@ -596,16 +670,23 @@ async function handleRequest(req, res) {
     const approval = pendingToolApprovals.get(body.approvalId);
     if (!approval) return send(res, 403, { error: "valid approval required" });
     pendingToolApprovals.delete(body.approvalId);
-    if (approval.root !== realpathSync(root)) return send(res, 409, { error: "repository changed; prepare the tool again" });
+    if (approval.root !== realpathSync(root) || approval.sessionId !== (body.sessionId || null)) {
+      return send(res, 409, { error: "session repository changed; prepare the tool again" });
+    }
     const tool = approval.tool;
     if (tool.tool === "edit") {
       const abs = safeResolve(root, tool.path);
       if (!abs || !existsSync(abs)) return send(res, 404, { error: "file not found" });
       let content = readFileSync(abs, "utf8");
+      if (sha256(content) !== approval.fileSha256) {
+        const audited = recordToolAudit(approval, { outcome: "conflict", reason: "file_changed" });
+        return send(res, 409, { error: "file changed; prepare the tool again", audited });
+      }
       if (content.includes(tool.old)) {
         content = content.replace(tool.old, tool.new);
-        writeFileSync(abs, content);
-        return send(res, 200, { ok: true, path: tool.path });
+        atomicWriteFile(abs, content, statSync(abs).mode);
+        const audited = recordToolAudit(approval, { outcome: "applied" });
+        return send(res, 200, { ok: true, path: tool.path, audited });
       }
       return send(res, 400, { error: "old text not found" });
     }
@@ -625,16 +706,33 @@ async function handleRequest(req, res) {
       child.stdout.on("data", appendOutput);
       child.stderr.on("data", appendOutput);
       let timedOut = false;
+      let termination = null;
+      const terminateProcessTree = () => new Promise((resolve) => {
+        if (!isWin) {
+          child.kill();
+          resolve();
+          return;
+        }
+        if (!child.pid) return resolve();
+        const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+        killer.once("error", () => {
+          child.kill();
+          resolve();
+        });
+        killer.once("close", resolve);
+      });
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill();
-      }, 120_000);
+        termination = terminateProcessTree();
+      }, SHELL_TIMEOUT_MS);
       const code = await new Promise((resolve) => {
         child.once("error", () => resolve(null));
         child.once("close", resolve);
       });
       clearTimeout(timer);
-      return send(res, 200, { ok: code === 0 && !timedOut, code, timedOut, truncated, output: out });
+      if (termination) await termination;
+      const audited = recordToolAudit(approval, { outcome: timedOut ? "timeout" : "completed", code, timedOut, truncated });
+      return send(res, 200, { ok: code === 0 && !timedOut, code, timedOut, truncated, output: out, audited });
     }
     return send(res, 400, { error: "unknown tool" });
   }
@@ -799,12 +897,23 @@ if (req.method === "GET" && url.pathname === "/api/health") {
       stream,
     };
 
+    const upstreamController = new AbortController();
+    let upstreamTimedOut = false;
+    const upstreamTimer = setTimeout(() => {
+      upstreamTimedOut = true;
+      upstreamController.abort();
+    }, 300000);
+    const onDisconnect = () => {
+      if (!res.writableEnded) upstreamController.abort();
+    };
+    req.once("aborted", onDisconnect);
+    res.once("close", onDisconnect);
     try {
       const r = await fetch(`${OLLAMA}/v1/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(300000),
+        signal: upstreamController.signal,
       });
       if (!r.ok) {
         const t = await r.text();
@@ -817,7 +926,10 @@ if (req.method === "GET" && url.pathname === "/api/health") {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          res.write(dec.decode(value, { stream: true }));
+          if (!await writeStreamChunk(res, dec.decode(value, { stream: true }))) {
+            await reader.cancel();
+            return;
+          }
         }
         res.end();
         return;
@@ -826,7 +938,19 @@ if (req.method === "GET" && url.pathname === "/api/health") {
       const content = data.choices?.[0]?.message?.content ?? "";
       return send(res, 200, { content, model });
     } catch (e) {
+      if (upstreamTimedOut && !res.headersSent && !res.destroyed) {
+        return send(res, 504, { error: "ollama timed out" });
+      }
+      if (upstreamController.signal.aborted || res.destroyed) {
+        if (!res.destroyed) res.destroy();
+        return;
+      }
+      if (res.headersSent) return res.destroy();
       return send(res, 502, { error: String(e.message || e) });
+    } finally {
+      clearTimeout(upstreamTimer);
+      req.off("aborted", onDisconnect);
+      res.off("close", onDisconnect);
     }
   }
 
