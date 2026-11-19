@@ -26,6 +26,8 @@ export function discoverTests(root) {
       hasPlaywright ? "e2e" : null,
       hasPlaywright ? "a11y" : null,
       hasPlaywright ? "visual" : null,
+      "security",
+      "vuln-scan",
     ].filter(Boolean),
   };
 }
@@ -37,5 +39,9 @@ export function planFor(changeHint, discovery) {
   plan.push({ step: "api", cmd: "probe local health and changed routes" });
   if (discovery.hasGold && /import|gold|parser/i.test(changeHint || "")) plan.push({ step: "gold-set", cmd: "run parser against gold fixtures" });
   if (discovery.hasPlaywright && /ui|page|screen|e2e/i.test(changeHint || "")) plan.push({ step: "e2e", cmd: "npx playwright test --project=chromium" });
+  if (/security|audit|auth|vuln|harden/i.test(changeHint || "") || true) {
+    plan.push({ step: "vuln-scan", cmd: discovery.scripts.audit || "pnpm audit --prod" });
+    plan.push({ step: "security", cmd: "secret scan, auth checks, input bounds, error leakage" });
+  }
   return plan;
 }

@@ -35,3 +35,13 @@ Test button builds a ladder from the repo:
 7. Visual (only with baselines)
 
 Skills: full-test-suite, api-testing, a11y-testing, visual-regression, playwright-check, playwright-debugger.
+
+## Security
+Security and vulnerability checks are part of the test plan:
+- Dependency audit (`pnpm audit --prod`)
+- Secret scan
+- Auth, session, CSRF
+- Injection and path bounds
+- Error leakage and headers
+
+Workflow: `security-audit`. Skills: `security-testing`, `vuln-scan`, `no-hardcoded-secrets`, `ci-security-review`.

@@ -29,6 +29,17 @@ export const WORKFLOWS = {
     ],
     skill: "version-diff",
   },
+  "security-audit": {
+    title: "Security and vulnerability audit",
+    steps: [
+      "Run the dependency audit.",
+      "Scan for committed secrets.",
+      "Check auth, session, and CSRF on changed routes.",
+      "Check path traversal, injection, and error leakage.",
+      "Report by severity with the smallest fix.",
+    ],
+    skill: "security-testing",
+  },
   "full-test": {
     title: "Full test ladder",
     steps: [
