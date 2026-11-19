@@ -1,32 +1,29 @@
-# Short-path coding assistant setup
+# Code Agent Windows setup
 
-## Double-click
+## One-click
+Download `Get-CodeAgent.cmd` from the repository and double-click it. The launcher downloads an immutable commit archive, verifies its SHA-256, and invokes the canonical setup script.
 
-From the **repo root**:
+## From a checkout or ZIP bundle
+Extract the full source tree to a short path and run `CA-Setup.cmd` from its root.
 
-`CA-Setup.cmd`
+Options:
+- `/startup` — create a login Startup shortcut
+- `/nolaunch` — install and verify without opening the app window
 
-That is the supported one-click installer (short name for Windows).
-
-## What it does
-
-1. Elevates to Administrator  
-2. Installs **Node** / **Ollama** / model if missing  
-3. Copies chat UI + helper scripts to **`C:\runcalc\agent\app\`** (short paths)  
-4. Writes profile to **`C:\runcalc\agent\config\oc.json`**  
-5. Creates shortcuts: **`CodeAgent.lnk`** (Desktop + Start Menu)  
-6. Opens the local chat in a dedicated Microsoft Edge app window (or the default browser if Edge is unavailable)
+Setup:
+1. Installs Node.js 22.23.5 only when a supported Node 22 runtime is absent; the official MSI is hash-verified.
+2. Installs Ollama 0.40.16 only when Ollama is absent; the official installer is hash-verified and an existing installation is not replaced.
+3. Selects a coding model using RAM/GPU capacity and fails if the model cannot be pulled and verified.
+4. Copies the complete UI, writes the launcher, and creates Desktop/Start Menu shortcuts.
+5. Preserves `C:\runcalc\agent\config\MEMORY.md` and uses versioned source directories.
 
 Logs: `C:\runcalc\agent\logs\setup-*.log`
 
-## Names (kept short on purpose)
+No .NET SDK, Node SDK, npm install, or manually installed build tools are needed. Re-run `CA-Setup.cmd` to refresh the installed payload; there is no separate `/repair` mode.
 
-| Item | Path / name |
-|------|-------------|
-| Installer | `CA-Setup.cmd` |
-| Setup script | `scripts\ca\setup.ps1` |
-| Agent home | `C:\runcalc\agent\` |
-| Chat payload | `C:\runcalc\agent\app\ui\` |
-| Profile | `C:\runcalc\agent\config\oc.json` |
-| Run helper | `C:\runcalc\agent\run.ps1` |
-| Shortcut | `CodeAgent.lnk` |
+## Build the canonical bundle
+```bash
+bash scripts/ca/pack-windows-bundle.sh ./CodeAgent-Windows-Setup.zip
+```
+
+The bundle contains the same `CA-Setup.cmd` and `setup.ps1` path used by a source checkout. It includes `chat-stream.mjs` and `open-app.ps1`, and its server is exercised by the bundle regression test.
