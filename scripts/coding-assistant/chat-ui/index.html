@@ -796,7 +796,15 @@ document.getElementById("searchBadge").onclick = () => {
     }
 
     document.getElementById("codingMode").addEventListener("change", refreshCtx);
-    document.getElementById("form").addEventListener("submit", async (ev) => {
+    
+    document.getElementById("input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        document.getElementById("form").requestSubmit();
+      }
+    });
+
+document.getElementById("form").addEventListener("submit", async (ev) => {
       ev.preventDefault();
       const input = document.getElementById("input");
       const text = input.value.trim();
