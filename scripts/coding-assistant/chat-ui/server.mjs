@@ -847,13 +847,13 @@ async function handleRequest(req, res) {
       ollama: OLLAMA,
       skills: listSkills(root).map((s) => s.slug),
       sessions: listSessions().length,
-      searchAllowed: process.env.CA_ALLOW_SEARCH === "1",
+      searchAllowed: process.env.CA_ALLOW_SEARCH !== "0",
     };
     return send(res, 200, diag);
   }
 
   if (req.method === "GET" && url.pathname === "/api/search") {
-    const allow = process.env.CA_ALLOW_SEARCH === "1";
+    const allow = process.env.CA_ALLOW_SEARCH !== "0";
     if (!allow) return send(res, 403, { error: "search disabled" });
     const q = (url.searchParams.get("q") || "").trim();
     if (!q) return send(res, 400, { error: "missing q" });

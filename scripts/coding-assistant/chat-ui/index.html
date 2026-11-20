@@ -16,7 +16,13 @@
     .badge.ok { border-color:var(--ok); color:var(--ok); }
     main { flex:1; display:grid; grid-template-columns:250px 1fr; min-height:0; }
     aside { border-right:1px solid var(--border); background:#10161e; display:flex; flex-direction:column; overflow:hidden; }
-    aside section { padding:0.55rem 0.65rem; border-bottom:1px solid var(--border); overflow:auto; }
+    aside { display:flex; flex-direction:column; }
+    aside section { padding:0.45rem 0.6rem; border-bottom:1px solid var(--border); overflow:auto; flex:1; min-height:60px; }
+    aside section.collapsed { flex:0 0 auto; min-height:0; }
+    aside section.collapsed > div { display:none; }
+    .resize-h { height:5px; cursor:row-resize; background:transparent; flex:0 0 5px; }
+    .resize-h:hover { background:var(--accent); }
+    aside h2 { cursor:pointer; user-select:none; }
     aside h2 { font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); margin:0 0 0.4rem; }
     .file,.skill-btn,.sess { display:block; width:100%; text-align:left; background:transparent; border:0; color:var(--text); padding:0.28rem 0.4rem; border-radius:6px; cursor:pointer; font-size:0.8rem; }
     .file:hover,.skill-btn:hover,.sess:hover { background:var(--panel); }
@@ -81,19 +87,22 @@
   </header>
   <main>
     <aside>
-      <section>
+      <section id="secTasks">
         <h2>Tasks <button id="addTask" type="button" title="Add task" style="margin-left:0.4rem;padding:0.1rem 0.45rem;font-size:0.75rem">+ Task</button></h2>
         <div id="tasks"></div>
       </section>
-      <section>
+      <div class="resize-h" data-above="secTasks"></div>
+      <section id="secSessions">
         <h2>Sessions</h2>
         <div id="sessions"></div>
       </section>
-      <section>
-        <h2>Skills</h2>
+      <div class="resize-h" data-above="secSessions"></div>
+      <section id="secSkills">
+        <h2 id="skillsHead">Skills</h2>
         <div id="skills"></div>
       </section>
-      <section style="flex:1">
+      <div class="resize-h" data-above="secSkills"></div>
+      <section id="secRepo">
         <h2>Repo</h2>
         <div class="repo-picker">
           <input id="repoPath" aria-label="Repository path" placeholder="Path to package.json or .git repository" />
@@ -665,12 +674,34 @@ document.getElementById("expBtn").onclick = async () => {
       }
     }
 
-    document.getElementById("searchBadge").onclick = async () => {
+    
+    document.getElementById("skillsHead").onclick = () => {
+      document.getElementById("secSkills").classList.toggle("collapsed");
+    };
+    document.querySelectorAll(".resize-h").forEach((h) => {
+      h.addEventListener("mousedown", (e) => {
+        const above = document.getElementById(h.dataset.above);
+        const startY = e.clientY;
+        const startH = above.offsetHeight;
+        const move = (ev) => {
+          const next = Math.max(60, startH + (ev.clientY - startY));
+          above.style.flex = "0 0 " + next + "px";
+        };
+        const up = () => {
+          window.removeEventListener("mousemove", move);
+          window.removeEventListener("mouseup", up);
+        };
+        window.addEventListener("mousemove", move);
+        window.addEventListener("mouseup", up);
+      });
+    });
+
+document.getElementById("searchBadge").onclick = async () => {
       if (!searchEnabled) {
         const response = await fetch(sessionUrl("/api/diagnostics"));
         const diagnostics = await response.json();
         if (!diagnostics.searchAllowed) {
-          addMsg("system", "Optional search is disabled. Restart the server with CA_ALLOW_SEARCH=1 to enable it.");
+          addMsg("system", "Search is disabled. Set CA_ALLOW_SEARCH=1 and restart, or leave the env unset to allow it.");
           return;
         }
       }
