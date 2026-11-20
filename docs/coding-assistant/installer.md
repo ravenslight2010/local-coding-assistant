@@ -3,8 +3,8 @@
 ## Current pin
 `Get-CodeAgent.cmd` installs immutable source:
 
-- Commit: `3aa7e39b234cd2e0329b309941f5cdc5fbf0a62e`
-- Archive SHA-256: `b7a9fc02de74ab02150f7756a2af96f16038819437ed17eff0adf521d8c10b25`
+- Commit: `e4e918e962accebd2a208e373b809ea482cfdd0c`
+- Archive SHA-256: `c0d53787287698bbdb5f657a3bc7b1db812f721baa5bcbcd2da24ddb4d271e8a`
 
 This pin includes Auto mode, secret store, workflows, testing ladder, include-in-current-task, and the hardware model menu.
 
