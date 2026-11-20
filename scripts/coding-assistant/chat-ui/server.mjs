@@ -172,7 +172,7 @@ Write tools (approval required):
 \`\`\`tool
 {"tool":"patch","files":[{"path":"a","old":"...","new":"..."},{"path":"b","content":"new file"}]}
 \`\`\`
-Inspect before editing. Prefer the smallest complete patch. If Auto is on, file tools apply without a prompt and you should continue to the next step (read result, edit, test) until done or blocked. Update the covering test in the same change. One tool block per response. Never claim a test passed without its output. Do not read secret files.`;
+Inspect before editing. Prefer the smallest complete patch. If Auto is on, file tools apply without a prompt and you should continue to the next step (read result, edit, test) until done or blocked. Do not create a follow-up task. If more work belongs with the current task, say so and ask to include it in the current task. Update the covering test in the same change. One tool block per response. Never claim a test passed without its output. Do not read secret files.`;
 
 function safeResolve(root, rel) {
   const value = String(rel || "").replace(/\\/g, "/");
@@ -538,7 +538,7 @@ function listTasks() {
       .map((f) => {
         try {
           const j = JSON.parse(readFileSync(path.join(TASKS_DIR, f), "utf8"));
-          return { id: j.id, type: j.type || "task", title: j.title || j.id, priority: j.priority || 5, status: j.status || "open", created: j.created || 0 };
+          return { id: j.id, type: j.type || "task", title: j.title || j.id, priority: j.priority || 5, status: j.status || "open", created: j.created || 0, items: Array.isArray(j.items) ? j.items.length : 0 };
         } catch { return null; }
       })
       .filter(Boolean)
@@ -1032,6 +1032,7 @@ async function handleRequest(req, res) {
       priority: Number(body.priority) || 5,
       status: "open",
       body: body.body || (body.payload && body.payload.body) || "",
+      items: Array.isArray(body.items) ? body.items : [],
       payload: body.payload || {},
       skill: body.skill || null,
       created: Date.now(),
@@ -1044,6 +1045,25 @@ async function handleRequest(req, res) {
     if (!t) return send(res, 404, { error: "not found" });
     return send(res, 200, t);
   }
+
+  if (req.method === "POST" && url.pathname === "/api/task/include") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const t = loadTask(body.id || "");
+    if (!t) return send(res, 404, { error: "task not found" });
+    if (!Array.isArray(t.items)) t.items = [];
+    const item = {
+      text: String(body.text || "").slice(0, 2000),
+      added: Date.now(),
+    };
+    if (!item.text) return send(res, 400, { error: "text required" });
+    t.items.push(item);
+    if (body.expandTitle && t.title.length < 120) {
+      t.title = (t.title + " + " + item.text).slice(0, 120);
+    }
+    saveTask(t);
+    return send(res, 200, { ok: true, items: t.items.length, task: t });
+  }
+
   if (req.method === "POST" && url.pathname === "/api/task/done") {
     const body = JSON.parse(await readBody(req) || "{}");
     const t = loadTask(body.id);

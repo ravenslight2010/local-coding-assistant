@@ -124,6 +124,7 @@
     const sessionsEl = document.getElementById("sessions");
     let messages = [];
     let sessionId = localStorage.getItem("ca_session") || null;
+    let currentTaskId = null;
     const contextFiles = new Set();
     const activeSkills = new Set();
     let searchEnabled = false;
@@ -303,11 +304,27 @@
         if (!tools.length) return;
         if (tools.length > 1) addMsg("system", "Code loop handles one tool at a time; extra tool requests in that reply were ignored.");
         if (steps >= maxToolSteps) {
-          addMsg("system", "Code loop paused after 8 tool steps. Review the progress above, then send a follow-up to continue.");
+          addMsg("system", "Paused after 8 tool steps.");
+          if (currentTaskId && confirm("Include the remaining work in the current task?")) {
+            const note = prompt("What should be added to the current task?", "Continue from last step");
+            if (note) {
+              await fetch("/api/task/include", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id: currentTaskId, text: note }) });
+              addMsg("system", "Added to current task.");
+              loadTasks();
+            }
+          }
           return;
         }
         if (toolOutputChars >= maxToolOutputChars) {
-          addMsg("system", "Code loop paused after reaching its repository-output limit. Review the progress above, then send a follow-up to continue.");
+          addMsg("system", "Paused at the repository-output limit.");
+          if (currentTaskId && confirm("Include the remaining work in the current task?")) {
+            const note = prompt("What should be added to the current task?", "Continue from last step");
+            if (note) {
+              await fetch("/api/task/include", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id: currentTaskId, text: note }) });
+              addMsg("system", "Added to current task.");
+              loadTasks();
+            }
+          }
           return;
         }
         steps++;
@@ -383,6 +400,7 @@
       if (!(d.tasks || []).length) el.innerHTML = "<span style='color:var(--muted);font-size:0.75rem'>No open tasks</span>";
     }
     async function processTask(id) {
+      currentTaskId = id;
       const r = await fetch("/api/task?id=" + id);
       if (!r.ok) return;
       const t = await r.json();
