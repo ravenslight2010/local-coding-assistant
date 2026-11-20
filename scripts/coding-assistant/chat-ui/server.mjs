@@ -864,6 +864,26 @@ async function handleRequest(req, res) {
     return send(res, 200, diag);
   }
 
+  if (req.method === "GET" && url.pathname === "/api/browse") {
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const exec = promisify(execFile);
+      const ps = `
+Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = "Select a repository folder"
+$d.ShowNewFolderButton = $false
+if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }
+`;
+      const { stdout } = await exec("powershell", ["-NoProfile", "-STA", "-Command", ps], { timeout: 120000 });
+      const picked = String(stdout || "").trim();
+      return send(res, 200, { path: picked });
+    } catch (err) {
+      return send(res, 500, { error: err.message || "browse failed" });
+    }
+  }
+
   if (req.method === "GET" && url.pathname === "/api/search") {
     const allow = process.env.CA_ALLOW_SEARCH !== "0";
     if (!allow) return send(res, 403, { error: "search disabled" });

@@ -106,7 +106,7 @@
         <h2>Repo</h2>
         <div class="repo-picker">
           <input id="repoPath" aria-label="Repository path" placeholder="Path to package.json or .git repository" />
-          <button id="selectRepo" type="button">Select</button>
+          <button id="browseRepo" type="button">Browse</button><button id="selectRepo" type="button">Select</button>
         </div>
         <div id="tree"></div>
       </section>
@@ -737,7 +737,20 @@ document.getElementById("searchBadge").onclick = () => {
       refreshCtx();
       addMsg("system", "Session repository: " + currentRepo);
     }
-    document.getElementById("selectRepo").onclick = selectRepository;
+    
+    document.getElementById("browseRepo").onclick = async () => {
+      addMsg("system", "Opening folder picker...");
+      const r = await fetch("/api/browse");
+      const d = await r.json();
+      if (d.path) {
+        document.getElementById("repoPath").value = d.path;
+        await selectRepository();
+      } else {
+        addMsg("system", "No folder selected.");
+      }
+    };
+
+document.getElementById("selectRepo").onclick = selectRepository;
     document.getElementById("repoPath").addEventListener("keydown", (event) => {
       if (event.key === "Enter") { event.preventDefault(); selectRepository(); }
     });
