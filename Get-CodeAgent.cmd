@@ -2,8 +2,8 @@
 setlocal EnableExtensions
 title Get Code Agent
 
-set "VERSION=db1f980d382c3a85952e5dff9bea8da0172d0de4"
-set "EXPECTED=41429952793693308268816e0e21c509c0df899fd4d36c04c8ee4dc276f1c248"
+set "VERSION=7e548decc27331c179dcbdbab3034c7e77976654"
+set "EXPECTED=5aa5a4e8a9967382430cc89d9c36fadaa70e3b600e3a95a8812c7ca557f71cef"
 set "AGENT=C:\runcalc\agent"
 set "SOURCE=%AGENT%\source\%VERSION%"
 set "STARTUP="
