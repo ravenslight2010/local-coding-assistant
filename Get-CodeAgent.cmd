@@ -1,6 +1,7 @@
 @echo off
 setlocal EnableExtensions
 title Get Code Agent
+echo Code Agent installer v3
 
 set "VERSION=7e548decc27331c179dcbdbab3034c7e77976654"
 set "EXPECTED=5aa5a4e8a9967382430cc89d9c36fadaa70e3b600e3a95a8812c7ca557f71cef"
@@ -23,18 +24,10 @@ if not %errorlevel%==0 (
   echo This setup needs Administrator.
   echo A Windows prompt should appear. Click Yes.
   echo.
-  if "%*"=="" (
-    powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs -ErrorAction Stop } catch { Write-Host 'Could not elevate:' $_.Exception.Message; exit 1 }"
-  ) else (
-    powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs -ErrorAction Stop } catch { Write-Host 'Could not elevate:' $_.Exception.Message; exit 1 }"
-  )
-  if errorlevel 1 (
-    echo.
-    echo Elevation failed.
-    echo Right-click Get-CodeAgent.cmd and choose "Run as administrator".
-    echo.
-    pause
-  )
+  echo Set UAC = CreateObject^("Shell.Application"^) > "%TEMP%\ca-elevate.vbs"
+  echo UAC.ShellExecute "%~f0", "%*", "", "runas", 1 >> "%TEMP%\ca-elevate.vbs"
+  cscript //nologo "%TEMP%\ca-elevate.vbs"
+  del "%TEMP%\ca-elevate.vbs" 2>nul
   exit /b
 )
 
