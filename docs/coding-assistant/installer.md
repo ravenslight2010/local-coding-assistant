@@ -3,8 +3,8 @@
 ## Current pin
 `Get-CodeAgent.cmd` installs immutable source:
 
-- Commit: `66aa3feb17a62e506934004ec7cd09b420cd960c`
-- Archive SHA-256: `026add1db5c827f306717278f6369c394849cf9bce2d7b307c1eecc36b461d37`
+- Commit: `adc740bc94003d704b5d04faefc7a0d97e70241d`
+- Archive SHA-256: `6227dfcc08008a4867888af114bc7a791e28e93f8619969b7dd4d2a347b35486`
 
 This pin includes Auto mode, secret store, workflows, testing ladder, include-in-current-task, and the hardware model menu.
 
@@ -37,3 +37,7 @@ Recommendation:
 - 16 GB → 7B
 - NVIDIA 8 GB+ → Qwen3.5 9B
 - 24 GB VRAM or 32 GB RAM → Qwen3.8 27B
+
+## Updater
+If `C:\\runcalc\\agent\\app` already exists, the same file updates it.
+Config, memory, and secrets are kept. App files are replaced.
