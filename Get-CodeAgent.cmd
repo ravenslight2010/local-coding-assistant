@@ -23,7 +23,11 @@ if not %errorlevel%==0 (
   echo This setup needs Administrator.
   echo A Windows prompt should appear. Click Yes.
   echo.
-  powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs -ErrorAction Stop } catch { Write-Host 'Could not elevate:' $_.Exception.Message; exit 1 }"
+  if "%*"=="" (
+    powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs -ErrorAction Stop } catch { Write-Host 'Could not elevate:' $_.Exception.Message; exit 1 }"
+  ) else (
+    powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs -ErrorAction Stop } catch { Write-Host 'Could not elevate:' $_.Exception.Message; exit 1 }"
+  )
   if errorlevel 1 (
     echo.
     echo Elevation failed.
