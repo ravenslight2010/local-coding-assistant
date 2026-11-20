@@ -91,11 +91,13 @@ function Ensure-Node {
   Step "Node.js $NodeVersion"
   if (HasCmd "node") {
     $installed = (& node -p "process.versions.node").Trim()
-    if ($installed.Split('.')[0] -eq $NodeVersion.Split('.')[0]) {
-      Info "Using supported Node $installed"
+    $major = 0
+    [void][int]::TryParse($installed.Split('.')[0], [ref]$major)
+    if ($major -ge 22) {
+      Info "Using Node $installed"
       return
     }
-    Fail "Node $installed is installed, but this release is tested with Node 22.x. Install Node 22 or remove the other version before setup."
+    Fail "Node $installed is too old. Install Node 22 or newer."
   }
 
   if ([Environment]::Is64BitOperatingSystem -eq $false) { Fail "Node x64 setup requires 64-bit Windows" }
