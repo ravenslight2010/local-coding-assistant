@@ -696,15 +696,7 @@ document.getElementById("expBtn").onclick = async () => {
       });
     });
 
-document.getElementById("searchBadge").onclick = async () => {
-      if (!searchEnabled) {
-        const response = await fetch(sessionUrl("/api/diagnostics"));
-        const diagnostics = await response.json();
-        if (!diagnostics.searchAllowed) {
-          addMsg("system", "Search is disabled. Set CA_ALLOW_SEARCH=1 and restart, or leave the env unset to allow it.");
-          return;
-        }
-      }
+document.getElementById("searchBadge").onclick = () => {
       searchEnabled = !searchEnabled;
       const b = document.getElementById("searchBadge");
       b.textContent = searchEnabled ? "search: on" : "search: off";
