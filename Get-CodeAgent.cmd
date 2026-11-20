@@ -42,11 +42,10 @@ powershell -NoProfile -Command ^
   "Invoke-WebRequest -Uri 'https://codeload.github.com/ravenslight2010/local-coding-assistant/zip/%VERSION%' -OutFile $archive -UseBasicParsing;" ^
   "$actual=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant();" ^
   "if ($actual -ne '%EXPECTED%') { throw 'Code Agent source SHA-256 mismatch' };" ^
-  "if (-not (Test-Path -LiteralPath '%SOURCE%')) {" ^
-  "  $extract=Join-Path $env:TEMP ([Guid]::NewGuid().ToString());" ^
-  "  Expand-Archive -LiteralPath $archive -DestinationPath $extract;" ^
-  "  Move-Item -LiteralPath (Join-Path $extract 'local-coding-assistant-%VERSION%') -Destination '%SOURCE%';" ^
-  "}"
+  "if (Test-Path -LiteralPath '%SOURCE%') { Remove-Item -LiteralPath '%SOURCE%' -Recurse -Force };" ^
+  "$extract=Join-Path $env:TEMP ([Guid]::NewGuid().ToString());" ^
+  "Expand-Archive -LiteralPath $archive -DestinationPath $extract;" ^
+  "Move-Item -LiteralPath (Join-Path $extract 'local-coding-assistant-%VERSION%') -Destination '%SOURCE%';"
 if errorlevel 1 (
   echo Download or verification failed. Check internet access and try again.
   pause

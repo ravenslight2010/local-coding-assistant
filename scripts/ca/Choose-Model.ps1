@@ -36,15 +36,15 @@ function Get-HardwareSummary {
 
 function Get-ModelOptions([object]$Hw) {
   $opts = @(
-    [pscustomobject]@{ Id = "qwen2.5-coder:1.5b"; Label = "1.5B - fastest, weakest"; MinRam = 4;  Recommend = $false },
-    [pscustomobject]@{ Id = "qwen2.5-coder:3b";   Label = "3B - fast, small machines"; MinRam = 8; Recommend = $false },
-    [pscustomobject]@{ Id = "qwen2.5-coder:7b";   Label = "7B - solid small coder"; MinRam = 12; Recommend = $false },
-    [pscustomobject]@{ Id = "qwen3.5:9b";         Label = "Qwen3.5 9B - better tools, longer context"; MinRam = 16; Recommend = $false },
-    [pscustomobject]@{ Id = "gpt-oss:20b";        Label = "gpt-oss 20B - fast agent on 16GB"; MinRam = 16; Recommend = $false },
-    [pscustomobject]@{ Id = "qwen2.5-coder:14b";  Label = "14B - stronger Qwen2.5"; MinRam = 24; Recommend = $false },
-    [pscustomobject]@{ Id = "qwen3.8:27b";        Label = "Qwen3.8 27B - best all-round on 24GB"; MinRam = 24; Recommend = $false },
-    [pscustomobject]@{ Id = "devstral-small-2:24b"; Label = "Devstral 24B - multi-file agent"; MinRam = 24; Recommend = $false },
-    [pscustomobject]@{ Id = "qwen3-coder:30b";    Label = "Qwen3-Coder 30B - fast MoE on 24GB"; MinRam = 24; Recommend = $false }
+    [pscustomobject]@{ Id = "qwen2.5-coder:1.5b"; Label = "1.5B fastest, weakest"; MinRam = 4; Recommend = $false },
+    [pscustomobject]@{ Id = "qwen2.5-coder:3b"; Label = "3B fast, small machines"; MinRam = 8; Recommend = $false },
+    [pscustomobject]@{ Id = "qwen2.5-coder:7b"; Label = "7B solid small coder"; MinRam = 12; Recommend = $false },
+    [pscustomobject]@{ Id = "qwen3.5:9b"; Label = "Qwen3.5 9B better tools"; MinRam = 16; Recommend = $false },
+    [pscustomobject]@{ Id = "gpt-oss:20b"; Label = "gpt-oss 20B fast agent"; MinRam = 16; Recommend = $false },
+    [pscustomobject]@{ Id = "qwen2.5-coder:14b"; Label = "14B stronger Qwen2.5"; MinRam = 24; Recommend = $false },
+    [pscustomobject]@{ Id = "qwen3.8:27b"; Label = "Qwen3.8 27B best all-round"; MinRam = 24; Recommend = $false },
+    [pscustomobject]@{ Id = "devstral-small-2:24b"; Label = "Devstral 24B multi-file agent"; MinRam = 24; Recommend = $false },
+    [pscustomobject]@{ Id = "qwen3-coder:30b"; Label = "Qwen3-Coder 30B fast MoE"; MinRam = 24; Recommend = $false }
   )
   $rec = "qwen2.5-coder:3b"
   if ($Hw.HasNvidia -and $Hw.VramGB -ge 16 -and $Hw.RamGB -ge 24) { $rec = "qwen3.8:27b" }
@@ -67,8 +67,10 @@ function Choose-Model {
   Write-Host "Models" -ForegroundColor Cyan
   $opts = Get-ModelOptions $hw
   for ($i = 0; $i -lt $opts.Count; $i++) {
-    $mark = if ($opts[$i].Recommend) { "  <-- recommended" } else { "" }
-    $fit = if ($hw.RamGB -ge $opts[$i].MinRam) { "" } else { "  (tight on this machine)" }
+    $mark = ""
+    if ($opts[$i].Recommend) { $mark = "  <-- recommended" }
+    $fit = ""
+    if ($hw.RamGB -lt $opts[$i].MinRam) { $fit = "  (tight on this machine)" }
     Write-Host ("  [{0}] {1}{2}{3}" -f ($i + 1), $opts[$i].Label, $mark, $fit)
   }
   Write-Host ""
