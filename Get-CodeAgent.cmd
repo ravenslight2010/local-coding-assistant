@@ -2,8 +2,8 @@
 setlocal EnableExtensions
 title Get Code Agent
 
-set "VERSION=55fdafc13fc303ed6f2319a09dcc7ab10945508e"
-set "EXPECTED=fe50348c8ca64d94029a40440ebbb24c58bab31485be663844ef29b5992f3352"
+set "VERSION=4a3a9b5e1326f76bcabea74bcecf5aa9ff42007c"
+set "EXPECTED=19dc5561206b772340f061b35e3537b93ad9724200dbc7adb1576d94f07a0a64"
 set "AGENT=C:\runcalc\agent"
 set "SOURCE=%AGENT%\source\%VERSION%"
 set "STARTUP="
@@ -45,7 +45,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% -LaunchChat
+if defined MODEL (
+  powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% -LaunchChat -Model "%MODEL%"
+) else (
+  powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% -LaunchChat
+)
 set "EC=%ERRORLEVEL%"
 echo.
 if %EC%==0 (echo Setup OK) else (echo Setup FAILED - see %AGENT%\logs)
