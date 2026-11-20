@@ -688,7 +688,12 @@ function buildChatBody(payload, root) {
     return fitted;
   }
 
-  let sys = SYSTEM + `\nCurrent repo: ${root}`;
+  let branch = "";
+  try {
+    const { execFileSync } = await import("node:child_process");
+    branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  } catch {}
+  let sys = SYSTEM + `\nCurrent repo: ${root}` + (branch ? `\nCurrent branch: ${branch}` : "");
   if (payload.codingMode === true) sys += `\n\n${CODING_WORKFLOW}`;
   sys = take("system", sys, true);
 
@@ -848,6 +853,37 @@ async function handleRequest(req, res) {
     sess.repo = next;
     saveSession(sess);
     return send(res, 200, { ok: true, root: next, sessionId: body.sessionId });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/repo/branch") {
+    const root = rootForSession(url.searchParams.get("sessionId"));
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const exec = promisify(execFile);
+      const cur = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root });
+      const list = await exec("git", ["branch", "--format=%(refname:short)"], { cwd: root });
+      const branches = String(list.stdout || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      return send(res, 200, { current: String(cur.stdout || "").trim(), branches });
+    } catch (err) {
+      return send(res, 200, { current: "", branches: [], error: err.message || "not a git repo" });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/repo/branch") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const root = rootForSession(body.sessionId);
+    const branch = String(body.branch || "").trim();
+    if (!branch || branch.includes("..") || /[\s;|&]/.test(branch)) return send(res, 400, { error: "invalid branch" });
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const exec = promisify(execFile);
+      await exec("git", ["checkout", branch], { cwd: root });
+      return send(res, 200, { ok: true, branch });
+    } catch (err) {
+      return send(res, 400, { error: err.message || "checkout failed" });
+    }
   }
 
   if (req.method === "GET" && url.pathname === "/api/diagnostics") {

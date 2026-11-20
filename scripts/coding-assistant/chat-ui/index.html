@@ -108,6 +108,10 @@
           <input id="repoPath" aria-label="Repository path" placeholder="Path to package.json or .git repository" />
           <button id="browseRepo" type="button">Browse</button><button id="selectRepo" type="button">Select</button>
         </div>
+        <div class="repo-picker">
+          <select id="branchSel" aria-label="Branch"><option value="">branch</option></select>
+          <button id="switchBranch" type="button">Switch</button>
+        </div>
         <div id="tree"></div>
       </section>
     </aside>
@@ -736,6 +740,7 @@ document.getElementById("searchBadge").onclick = () => {
       await Promise.all([health(), loadTree(""), loadSkills()]);
       refreshCtx();
       addMsg("system", "Session repository: " + currentRepo);
+      await loadBranches();
     }
     
     document.getElementById("browseRepo").onclick = async () => {
@@ -748,6 +753,38 @@ document.getElementById("searchBadge").onclick = () => {
       } else {
         addMsg("system", "No folder selected.");
       }
+    };
+
+
+    async function loadBranches() {
+      const r = await fetch(sessionUrl("/api/repo/branch"));
+      const d = await r.json();
+      const sel = document.getElementById("branchSel");
+      sel.innerHTML = "";
+      const cur = document.createElement("option");
+      cur.value = d.current || "";
+      cur.textContent = d.current ? ("current: " + d.current) : "no branch";
+      sel.appendChild(cur);
+      for (const b of (d.branches || [])) {
+        if (b === d.current) continue;
+        const o = document.createElement("option");
+        o.value = b; o.textContent = b;
+        sel.appendChild(o);
+      }
+    }
+    document.getElementById("switchBranch").onclick = async () => {
+      const branch = document.getElementById("branchSel").value;
+      if (!branch || branch.startsWith("current:")) return;
+      const r = await fetch("/api/repo/branch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: ensureSessionId(), branch }),
+      });
+      const d = await r.json();
+      if (!r.ok) { addMsg("system", "Branch switch failed: " + (d.error || "")); return; }
+      addMsg("system", "Switched to " + branch);
+      await loadBranches();
+      await loadTree("");
     };
 
 document.getElementById("selectRepo").onclick = selectRepository;
