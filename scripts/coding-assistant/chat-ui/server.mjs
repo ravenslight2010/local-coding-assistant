@@ -154,7 +154,16 @@ The UI will show an approval card. Prefer local files and skills first.
 Optional search is available when the user enables it (/search).
 Be concise. Show concrete paths.`;
 
-const CODING_WORKFLOW = `Coding mode is enabled for this request.
+const CODING_WORKFLOW = `Coding mode is ON. You have file tools. Use them.
+Rule: if the user asks about the repo, files, or code, your first action is a tool block, not a refusal.
+Never say you cannot access files, the computer, or the repository.
+Start by reading or searching, then edit.
+
+Example first reply when asked what is in the repo:
+\`\`\`tool
+{"tool":"search","query":"package.json"}
+\`\`\`
+
 Read-only tools:
 \`\`\`tool
 {"tool":"search","query":"literal text","path":"optional/dir"}
