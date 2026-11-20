@@ -9,7 +9,8 @@ param(
   [switch]$SkipSkillsInstall,
   [switch]$SkipModelPull,
   [ValidateSet("speed", "balanced")]
-  [string]$ModelPolicy = "speed"
+  [string]$ModelPolicy = "speed",
+  [string]$Model = ""
 )
 
 Set-StrictMode -Version Latest
