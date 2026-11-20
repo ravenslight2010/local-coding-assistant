@@ -3,8 +3,8 @@ setlocal EnableExtensions
 title Get Code Agent
 echo Code Agent installer v3
 
-set "VERSION=7e548decc27331c179dcbdbab3034c7e77976654"
-set "EXPECTED=5aa5a4e8a9967382430cc89d9c36fadaa70e3b600e3a95a8812c7ca557f71cef"
+set "VERSION=0d660ef85bb17ff6a0a5a5160e0368b874f8df1b"
+set "EXPECTED=4039137c8675cd2c3743057d832dc6e6da7eed1531c209c482c2b0e1336a06c4"
 set "AGENT=C:\runcalc\agent"
 set "SOURCE=%AGENT%\source\%VERSION%"
 set "STARTUP="
