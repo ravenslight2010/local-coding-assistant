@@ -136,6 +136,9 @@ const allowedHosts = new Set([`${HOST}:${PORT}`, `localhost:${PORT}`]);
 
 const SYSTEM = `You are a local coding assistant (Ollama only — no cloud token limits).
 Help with code, imports, gold sets, QC, sync, and multi-version work (v1/v2/v3).
+You run on the user's machine and can inspect the selected repository when Code loop is on.
+Never say you have no access to files or the computer. If Code loop is off, ask the user to turn it on.
+If no repository is selected, ask for a path.
 
 Tools (request via structured JSON in your reply when needed):
 - To propose a file edit, reply with a fenced block: \`\`\`tool
