@@ -24,3 +24,8 @@ To move the pin:
 2. Download `https://codeload.github.com/ravenslight2010/local-coding-assistant/zip/<sha>`.
 3. Record the SHA-256.
 4. Update `VERSION` and `EXPECTED` together.
+
+## Model choice
+Setup shows RAM, GPU, and VRAM, then a numbered list.
+The recommended model is marked. Press Enter to accept it, or type a number.
+`/model` on the command line skips the menu.

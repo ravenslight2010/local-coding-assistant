@@ -136,12 +136,16 @@ function Ensure-Ollama {
 }
 
 function Select-Model {
-  . (Join-Path $PSScriptRoot "Select-CodingModel.ps1")
-  $choice = Get-CodingModelChoice -Policy $ModelPolicy
-  Info $choice.Reason
+  if ($Model) {
+    Info "Using requested model $Model"
+    return $Model
+  }
+  . (Join-Path $PSScriptRoot "Choose-Model.ps1")
+  $picked = Choose-Model
+  Info "Selected $picked"
   Ensure-Dir (Join-Path $AgentRoot "config")
-  $choice | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $AgentRoot "config\model-choice.json") -Encoding UTF8
-  return [string]$choice.Model
+  @{ Model = $picked; remember = $true; Policy = $ModelPolicy } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $AgentRoot "config\model-choice.json") -Encoding UTF8
+  return $picked
 }
 
 function Ensure-Model([string]$Model) {
