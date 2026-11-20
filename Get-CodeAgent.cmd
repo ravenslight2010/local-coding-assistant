@@ -4,8 +4,8 @@ title Get Code Agent
 echo Code Agent installer v3
 echo Source pin: %VERSION%
 
-set "VERSION=e23a8c18624fbdc879f476f975062b62627ede27"
-set "EXPECTED=6766e2bd79b8bb061512ff9287799964720a4fd40d0229e574a31b385deb9ee2"
+set "VERSION=66aa3feb17a62e506934004ec7cd09b420cd960c"
+set "EXPECTED=026add1db5c827f306717278f6369c394849cf9bce2d7b307c1eecc36b461d37"
 set "AGENT=C:\runcalc\agent"
 set "SOURCE=%AGENT%\source\%VERSION%"
 set "STARTUP="
