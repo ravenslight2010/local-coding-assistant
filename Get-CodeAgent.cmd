@@ -19,8 +19,18 @@ goto parse
 
 net session >nul 2>&1
 if not %errorlevel%==0 (
-  echo Requesting Administrator...
-  powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs"
+  echo.
+  echo This setup needs Administrator.
+  echo A Windows prompt should appear. Click Yes.
+  echo.
+  powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs -ErrorAction Stop } catch { Write-Host 'Could not elevate:' $_.Exception.Message; exit 1 }"
+  if errorlevel 1 (
+    echo.
+    echo Elevation failed.
+    echo Right-click Get-CodeAgent.cmd and choose "Run as administrator".
+    echo.
+    pause
+  )
   exit /b
 )
 
