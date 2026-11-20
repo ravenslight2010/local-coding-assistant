@@ -2,6 +2,7 @@
 setlocal EnableExtensions
 title Get Code Agent
 echo Code Agent installer v3
+echo Source pin: %VERSION%
 
 set "VERSION=1e80b17759bcadc51cf6816b0ea092fa6a85d369"
 set "EXPECTED=b00a7e4af3997dff0cc93c5284e41cfa9e9b357726775344ce802bcedd2f9949"
