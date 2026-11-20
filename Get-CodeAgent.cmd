@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 title Get Code Agent
-echo Code Agent installer v3
+echo Code Agent installer/updater v4
 echo Source pin: %VERSION%
 
 set "VERSION=66aa3feb17a62e506934004ec7cd09b420cd960c"
@@ -35,6 +35,11 @@ if not %errorlevel%==0 (
 mkdir "%AGENT%\logs" 2>nul
 mkdir "%AGENT%\source" 2>nul
 
+set "MODE=Installing"
+if exist "%AGENT%\app\ui\server.mjs" set "MODE=Updating"
+echo %MODE% Code Agent...
+echo Config, memory, and secrets are kept.
+
 echo Downloading verified Code Agent source %VERSION%...
 powershell -NoProfile -Command ^
   "$ErrorActionPreference='Stop';" ^
@@ -59,6 +64,6 @@ if defined MODEL (
 )
 set "EC=%ERRORLEVEL%"
 echo.
-if %EC%==0 (echo Setup OK) else (echo Setup FAILED - see %AGENT%\logs)
+if %EC%==0 (echo %MODE% OK) else (echo %MODE% FAILED - see %AGENT%\logs)
 pause
 exit /b %EC%
