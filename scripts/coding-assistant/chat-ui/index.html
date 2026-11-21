@@ -52,6 +52,18 @@
     .repo-picker { display:flex; gap:0.3rem; margin-bottom:0.45rem; }
     .repo-picker input { min-width:0; flex:1; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); padding:0.35rem; font:inherit; font-size:0.72rem; }
     .repo-picker button { padding:0.3rem 0.45rem; font-size:0.72rem; }
+    #repoBrowser { width:min(32rem,calc(100% - 1.5rem)); max-height:calc(100dvh - 1.5rem); overflow:auto; padding:1rem; border:1px solid var(--border); border-radius:12px; background:var(--panel); color:var(--text); }
+    #repoBrowser::backdrop { background:#0009; }
+    #repoBrowser h2 { margin:0 0 0.75rem; font-size:1.1rem; }
+    #repoBrowser label,#repoBrowserStatus { font-size:0.85rem; color:var(--muted); }
+    #repoBrowser form { padding:0; margin:0.25rem 0 0.5rem; border:0; align-items:stretch; }
+    #repoBrowser button { min-height:2.75rem; }
+    #repoBrowser button:disabled { cursor:default; opacity:0.5; }
+    #repoFolders { list-style:none; margin:0.5rem 0; padding:0; max-height:16rem; overflow:auto; }
+    #repoFolders button { width:100%; text-align:left; overflow-wrap:anywhere; }
+    #repoBrowserStatus { min-height:1.3em; margin:0.5rem 0; }
+    .repo-browser-actions { display:flex; flex-wrap:wrap; gap:0.4rem; }
+    .repo-browser-footer { justify-content:flex-end; }
     main.canvas-open { grid-template-columns:250px minmax(0,1.15fr) minmax(320px,0.85fr); }
     .canvas-panel { display:none; min-width:0; min-height:0; flex-direction:column; border-left:1px solid var(--border); background:var(--panel); }
     main.canvas-open .canvas-panel:not([hidden]) { display:flex; }
@@ -143,7 +155,7 @@
         <h2>Repo</h2>
         <div class="repo-picker">
           <input id="repoPath" aria-label="Repository path" placeholder="Path to package.json or .git repository" />
-          <button id="browseRepo" type="button">Browse</button><button id="selectRepo" type="button">Select</button>
+          <button id="browseRepo" type="button" aria-haspopup="dialog">Browse</button><button id="selectRepo" type="button">Select</button>
         </div>
         <div class="repo-picker">
           <select id="branchSel" aria-label="Branch"><option value="">branch</option></select>
@@ -198,6 +210,24 @@
       </div>
     </section>
   </main>
+  <dialog id="repoBrowser" aria-labelledby="repoBrowserTitle">
+    <h2 id="repoBrowserTitle">Choose a repository folder</h2>
+    <label for="browsePath">Folder path</label>
+    <form id="browsePathForm" class="repo-picker">
+      <input id="browsePath" type="text" maxlength="4096" spellcheck="false" autofocus>
+      <button type="submit">Go</button>
+    </form>
+    <div class="repo-browser-actions">
+      <button id="browseHome" type="button">Home</button>
+      <button id="browseParent" type="button" disabled>Up one folder</button>
+    </div>
+    <p id="repoBrowserStatus" role="status"></p>
+    <ul id="repoFolders" aria-label="Folders"></ul>
+    <div class="repo-browser-actions repo-browser-footer">
+      <button id="browseCancel" type="button">Cancel</button>
+      <button id="browseSelect" type="button" class="ok" disabled>Use this folder</button>
+    </div>
+  </dialog>
   <script type="module">
     import { consumeChatStream } from "/chat-stream.mjs";
     import { canAutoApplyTool, supportsCodingLoopTool } from "/tool-policy.mjs";
@@ -829,10 +859,8 @@ document.getElementById("searchBadge").onclick = () => {
       refreshCtx();
     };
 
-    async function selectRepository() {
+    async function selectRepository(selected) {
       const input = document.getElementById("repoPath");
-      const selected = input.value.trim();
-      if (!selected) return;
       ensureSessionId();
       const r = await fetch("/api/repo", {
         method: "POST",
@@ -840,11 +868,7 @@ document.getElementById("searchBadge").onclick = () => {
         body: JSON.stringify({ sessionId, path: selected }),
       });
       const d = await r.json();
-      if (!r.ok) {
-        input.value = currentRepo;
-        addMsg("system", "Repository selection failed: " + (d.error || r.status));
-        return;
-      }
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       currentRepo = d.root;
       input.value = currentRepo;
       contextFiles.clear();
@@ -857,15 +881,83 @@ document.getElementById("searchBadge").onclick = () => {
       await loadBranches();
     }
     
-    document.getElementById("browseRepo").onclick = async () => {
-      addMsg("system", "Opening folder picker...");
-      const r = await fetch("/api/browse");
-      const d = await r.json();
-      if (d.path) {
-        document.getElementById("repoPath").value = d.path;
-        await selectRepository();
-      } else {
-        addMsg("system", "No folder selected.");
+    const repoBrowser = document.getElementById("repoBrowser");
+    const browsePath = document.getElementById("browsePath");
+    const browseStatus = document.getElementById("repoBrowserStatus");
+    const browseFolders = document.getElementById("repoFolders");
+    const browseParent = document.getElementById("browseParent");
+    const browseSelect = document.getElementById("browseSelect");
+    let browseLocation;
+    let browseRequest;
+
+    async function browseTo(folder) {
+      browseRequest?.abort();
+      const request = new AbortController();
+      const previousInput = browsePath.value;
+      browseRequest = request;
+      browseLocation = null;
+      browseSelect.disabled = true;
+      browseParent.disabled = true;
+      browseFolders.replaceChildren();
+      browseStatus.textContent = "Loading folders…";
+      try {
+        const response = await fetch("/api/browse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: folder }),
+          signal: request.signal,
+        });
+        const result = await response.json();
+        if (request.signal.aborted) return;
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        browseLocation = result;
+        if (browsePath.value === previousInput) browsePath.value = result.path;
+        browseParent.disabled = !result.parent;
+        browseSelect.disabled = !result.isRepository;
+        browseStatus.textContent = (result.isRepository
+          ? "Repository found. Choose Use this folder to select it."
+          : "Open a folder containing .git or package.json.") + (result.truncated ? " Showing the first 250 folders; enter a path to open another." : "");
+        for (const folder of result.folders) {
+          const item = document.createElement("li");
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = folder.name;
+          button.onclick = () => browseTo(folder.path);
+          item.append(button);
+          browseFolders.append(item);
+        }
+      } catch (error) {
+        if (!request.signal.aborted) browseStatus.textContent = `Couldn’t open the folder: ${error.message}`;
+      }
+    }
+
+    document.getElementById("browseRepo").onclick = () => {
+      browsePath.value = "";
+      repoBrowser.showModal();
+      browseTo(null);
+    };
+    document.getElementById("browsePathForm").onsubmit = (event) => {
+      event.preventDefault();
+      if (browsePath.value.trim()) browseTo(browsePath.value.trim());
+    };
+    document.getElementById("browseHome").onclick = () => browseTo(null);
+    browseParent.onclick = () => browseTo(browseLocation.parent);
+    document.getElementById("browseCancel").onclick = () => {
+      browseRequest?.abort();
+      repoBrowser.close();
+    };
+    repoBrowser.addEventListener("cancel", () => browseRequest?.abort());
+    browseSelect.onclick = async () => {
+      const location = browseLocation;
+      browseSelect.disabled = true;
+      try {
+        await selectRepository(location.path);
+        repoBrowser.close();
+      } catch (error) {
+        if (browseLocation === location) {
+          browseSelect.disabled = false;
+          browseStatus.textContent = "Repository selection failed: " + error.message;
+        }
       }
     };
 
@@ -901,9 +993,15 @@ document.getElementById("searchBadge").onclick = () => {
       await loadTree("");
     };
 
-document.getElementById("selectRepo").onclick = selectRepository;
+    async function selectTypedRepository() {
+      const selected = document.getElementById("repoPath").value.trim();
+      if (!selected) return;
+      try { await selectRepository(selected); }
+      catch (error) { addMsg("system", "Repository selection failed: " + error.message); }
+    }
+    document.getElementById("selectRepo").onclick = selectTypedRepository;
     document.getElementById("repoPath").addEventListener("keydown", (event) => {
-      if (event.key === "Enter") { event.preventDefault(); selectRepository(); }
+      if (event.key === "Enter") { event.preventDefault(); selectTypedRepository(); }
     });
 
     document.getElementById("diag").onclick = async () => {
