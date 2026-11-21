@@ -294,6 +294,7 @@ function normalizeTool(root, tool) {
   if (tool.tool === "git_pr" && typeof tool.title === "string" && typeof tool.body === "string") {
     return { tool: "git_pr", title: tool.title.slice(0, 120), body: tool.body.slice(0, 2000), base: String(tool.base || "main").slice(0, 80) };
   }
+  if (tool.tool === "install_app") return { tool: "install_app" };
   return null;
 }
 
@@ -1356,12 +1357,67 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
         return send(res, 400, { error: String(err.message || err).slice(0, 500) });
       }
     }
+
+    if (tool.tool === "install_app") {
+      const candidates = [
+        "scripts/self-host/Install-RunCalcHost.ps1",
+        "scripts/install-host.ps1",
+        "install.ps1",
+        "scripts/ca/setup.ps1",
+      ];
+      let script = null;
+      for (const c of candidates) {
+        const abs = path.join(root, c);
+        if (existsSync(abs)) { script = abs; break; }
+      }
+      if (!script) return send(res, 400, { error: "no installer found in this repo", looked: candidates });
+      const { spawn } = await import("node:child_process");
+      const isWin = process.platform === "win32";
+      const child = spawn(isWin ? "powershell.exe" : "pwsh",
+        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-NonInteractive"],
+        { cwd: root, windowsHide: true });
+      let out = "";
+      const append = (c) => { const t = c.toString(); if (out.length < 8000) out += t.slice(0, 8000 - out.length); };
+      child.stdout.on("data", append);
+      child.stderr.on("data", append);
+      const code = await new Promise((resolve) => { child.once("close", resolve); child.once("error", () => resolve(null)); });
+      return send(res, 200, { ok: code === 0, code, script: path.relative(root, script), output: out.slice(0, 4000) });
+    }
     return send(res, 400, { error: "unknown tool" });
   }
 
   
   
-  if (req.method === "GET" && url.pathname === "/api/selftest") {
+  
+  if (req.method === "POST" && url.pathname === "/api/install") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const root = rootForSession(body.sessionId);
+    const candidates = [
+      "scripts/self-host/Install-RunCalcHost.ps1",
+      "scripts/install-host.ps1",
+      "install.ps1",
+      "scripts/ca/setup.ps1",
+    ];
+    let script = null;
+    for (const c of candidates) {
+      const abs = path.join(root, c);
+      if (existsSync(abs)) { script = abs; break; }
+    }
+    if (!script) return send(res, 400, { error: "no installer found", looked: candidates });
+    const { spawn } = await import("node:child_process");
+    const isWin = process.platform === "win32";
+    const child = spawn(isWin ? "powershell.exe" : "pwsh",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-NonInteractive"],
+      { cwd: root, windowsHide: true });
+    let out = "";
+    const append = (c) => { const t = c.toString(); if (out.length < 8000) out += t.slice(0, 8000 - out.length); };
+    child.stdout.on("data", append);
+    child.stderr.on("data", append);
+    const code = await new Promise((resolve) => { child.once("close", resolve); child.once("error", () => resolve(null)); });
+    return send(res, 200, { ok: code === 0, code, script: path.relative(root, script), output: out.slice(0, 4000) });
+  }
+
+if (req.method === "GET" && url.pathname === "/api/selftest") {
     const checks = {};
     try {
       const r = await fetch(OLLAMA + "/api/tags", { signal: AbortSignal.timeout(3000) });

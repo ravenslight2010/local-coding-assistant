@@ -119,6 +119,7 @@
     <button id="nextTask" title="Load next open task">Next task</button>
     <button id="secBtn" title="Secrets">Secrets</button>
     <button id="selfBtn" title="Self test">Self-test</button>
+    <button id="installBtn" title="Install the selected app">Install app</button>
     <button id="memSearch" title="Search memory">Recall</button>
   </header>
   <main>
@@ -1133,6 +1134,18 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
       const j = await r.json();
       const lines = Object.entries(j).map(([k,v]) => k + ": " + v).join("\n");
       alert("Self-test\n" + lines);
+    });
+
+
+    document.getElementById("installBtn")?.addEventListener("click", async () => {
+      if (!confirm("Install the currently selected app? This runs its installer if one exists.")) return;
+      const r = await fetch("/api/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: currentSession || "" })
+      });
+      const j = await r.json();
+      alert(j.ok ? "Installed via " + (j.script || "installer") : ("Install failed: " + (j.error || j.output || "unknown")));
     });
 
 </script>
