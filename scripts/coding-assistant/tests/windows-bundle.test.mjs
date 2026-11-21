@@ -26,6 +26,9 @@ test("canonical Windows bundle is complete and its packaged server starts", { sk
 
     const extracted = spawnSync("unzip", ["-q", archive, "-d", unpacked], { encoding: "utf8" });
     assert.equal(extracted.status, 0, extracted.stderr);
+    const archiveListing = spawnSync("unzip", ["-Z1", archive], { encoding: "utf8" });
+    assert.equal(archiveListing.status, 0, archiveListing.stderr);
+    assert.doesNotMatch(archiveListing.stdout, /scripts\/coding-assistant\/chat-ui\/node_modules\//);
     for (const relative of [
       "CA-Setup.cmd",
       "scripts/ca/setup.ps1",
@@ -34,6 +37,8 @@ test("canonical Windows bundle is complete and its packaged server starts", { sk
       "scripts/coding-assistant/chat-ui/index.html",
       "scripts/coding-assistant/chat-ui/chat-stream.mjs",
       "scripts/coding-assistant/chat-ui/open-app.ps1",
+      "scripts/coding-assistant/chat-ui/package.json",
+      "scripts/coding-assistant/chat-ui/package-lock.json",
     ]) {
       assert.equal(spawnSync("test", ["-f", path.join(unpacked, relative)]).status, 0, relative);
     }

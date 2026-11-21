@@ -5,12 +5,16 @@ A local coding assistant that runs on your machine with Ollama. Inference requir
 ## What it includes
 - Versioned Windows setup with verified Node.js and Ollama downloads
 - Chat UI with streaming, sessions, and tool approval cards
+- Canvas preview for local apps with a screenshot and browser-error check
 - Bounded coding loop: inspect repository files, propose edits, run approved tests, and use results to continue
 - Domain skills, a task queue, optional web search, persistent memory, and an opt-in context pack
 - Local checkout selection for coding tasks
 
 ## Coding loop
 Turn on **Code loop** to let the assistant search and read relevant repository files, propose focused edits, then use approved command results to continue. Repository reads are bounded and skip dependency/build folders and credential-like files. File edits and shell commands require approval; shell commands are disabled unless the server is launched with `CA_ALLOW_SHELL=1`. Edit approvals are bound to the prepared session, repository, and file SHA-256; stale approvals return `409` without overwriting newer content. Approved edits use atomic replacement. Up to 200 outcome-only edit/command audit records are kept in `agent/audit/tool-actions.json`; source changes and command text are not recorded. Chat streaming honors client disconnects and response backpressure.
+
+## Canvas preview and browser check
+Open **Canvas** to preview an app at `http://127.0.0.1:<port>` in desktop, tablet, or phone width. **Check page** opens it in a fresh headless browser, captures a screenshot, and reports HTTP status, title, JavaScript console errors, and uncaught page errors. The browser has no saved cookies; it blocks cross-origin and non-GET/HEAD requests, limits a check to 100 requests and one active run, and does not click or automate controls. Windows uses installed Microsoft Edge; on other systems set `CA_TEST_BROWSER_PATH` to a Chromium-based browser executable.
 
 ## Quick start (Windows)
 1. Download and double-click [Get-CodeAgent.cmd](https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/Get-CodeAgent.cmd).
@@ -36,7 +40,7 @@ Build the canonical bundle on Linux/macOS with:
 bash scripts/ca/pack-windows-bundle.sh ./CodeAgent-Windows-Setup.zip
 ```
 
-The command also writes a `.sha256` file. No .NET SDK, npm dependencies, or build tools are required to install or run the assistant.
+The command also writes a `.sha256` file. No .NET SDK or build tools are required; setup automatically installs the pinned Playwright Core runtime used by Canvas.
 
 ## Tested runtime
 - Node.js 22.23.5; missing Node is installed from the official MSI after SHA-256 verification

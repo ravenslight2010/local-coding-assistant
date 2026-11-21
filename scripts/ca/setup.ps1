@@ -172,6 +172,13 @@ function Copy-App([string]$Repo, [string]$Model) {
   $ui = Join-Path $app "ui"
   Ensure-Dir $ui
   Copy-Item -Path (Join-Path $Repo "scripts\coding-assistant\chat-ui\*") -Destination $ui -Recurse -Force
+  Push-Location $ui
+  try {
+    & npm ci --omit=dev --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { Fail "Browser test runtime installation failed" }
+  } finally {
+    Pop-Location
+  }
   Set-Content -LiteralPath (Join-Path $app "package.json") -Value '{"name":"ca-agent","private":true}' -Encoding UTF8
   foreach ($name in @("server.mjs", "index.html", "chat-stream.mjs", "open-app.ps1")) {
     if (-not (Test-Path -LiteralPath (Join-Path $app "ui\$name"))) { Fail "Installed UI is missing $name" }
@@ -250,8 +257,11 @@ function Verify-Installation([string]$Model) {
   if (-not (HasCmd "ollama")) { Fail "Ollama missing after setup" }
   $tags = Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 5
   if (-not ($tags.models.name -contains $Model)) { Fail "Model $Model missing after setup" }
-  foreach ($name in @("server.mjs", "index.html", "chat-stream.mjs", "open-app.ps1")) {
+  foreach ($name in @("server.mjs", "index.html", "chat-stream.mjs", "open-app.ps1", "package.json", "package-lock.json")) {
     if (-not (Test-Path -LiteralPath (Join-Path $AgentRoot "app\ui\$name"))) { Fail "Installed file missing: $name" }
+  }
+  if (-not (Test-Path -LiteralPath (Join-Path $AgentRoot "app\ui\node_modules\playwright-core\package.json"))) {
+    Fail "Installed browser test runtime missing"
   }
   Info "Node, Ollama, model, and application payload verified"
 }
