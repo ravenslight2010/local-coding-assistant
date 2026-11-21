@@ -10,10 +10,12 @@ set "AGENT=C:\runcalc\agent"
 set "SOURCE=%AGENT%\source\%VERSION%"
 set "STARTUP="
 set "MODEL="
+set "TESTBROWSERS="
 
 :parse
 if "%~1"=="" goto done
 if /i "%~1"=="/startup" set "STARTUP=-AddStartup"
+if /i "%~1"=="/testbrowsers" set "TESTBROWSERS=-InstallTestBrowsers"
 if /i "%~1"=="/model" ( set "MODEL=%~2" & shift )
 shift
 goto parse
@@ -59,9 +61,9 @@ if errorlevel 1 (
 )
 
 if defined MODEL (
-  powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% -LaunchChat -Model "%MODEL%"
+  powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% %TESTBROWSERS% -LaunchChat -Model "%MODEL%"
 ) else (
-  powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% -LaunchChat
+  powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% %TESTBROWSERS% -LaunchChat
 )
 set "EC=%ERRORLEVEL%"
 echo.

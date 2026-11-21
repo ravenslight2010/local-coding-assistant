@@ -15,7 +15,10 @@ Double-click `Get-CodeAgent.cmd`. It requests Administrator, verifies the zip, t
 ```bat
 Get-CodeAgent.cmd /startup
 Get-CodeAgent.cmd /model qwen2.5-coder:7b
+Get-CodeAgent.cmd /testbrowsers
 ```
+
+Setup uses installed Microsoft Edge for Canvas checks. Use `/testbrowsers` only if you also need Playwright’s Chromium, Firefox, and WebKit downloads for other tests. Failed optional browser downloads do not stop Code Agent setup.
 
 ## Updating later
 Do not point the installer at floating `main`.
