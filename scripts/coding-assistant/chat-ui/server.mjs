@@ -191,6 +191,9 @@ Git tools (status is free; pull/push/clone need approval):
 \`\`\`tool
 {"tool":"git_clone","url":"https://github.com/org/repo.git","dest":"folder-name"}
 \`\`\`
+\`\`\`tool
+{"tool":"git_pr","title":"short title","body":"what changed","base":"main"}
+\`\`\`
 
 Write tools (approval required):
 \`\`\`tool
@@ -251,6 +254,9 @@ function normalizeTool(root, tool) {
   }
   if (tool.tool === "git_clone" && typeof tool.url === "string" && typeof tool.dest === "string") {
     return { tool: "git_clone", url: tool.url.slice(0, 200), dest: tool.dest.slice(0, 200) };
+  }
+  if (tool.tool === "git_pr" && typeof tool.title === "string" && typeof tool.body === "string") {
+    return { tool: "git_pr", title: tool.title.slice(0, 120), body: tool.body.slice(0, 2000), base: String(tool.base || "main").slice(0, 80) };
   }
   return null;
 }
@@ -1151,7 +1157,22 @@ if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPa
     return send(res, result.status, result.body);
   }
 
-  if (req.method === "POST" && url.pathname === "/api/tool/apply") {
+  
+function gitEnv() {
+  const token = getSecret(AGENT_ROOT, "GITHUB_TOKEN") || process.env.GITHUB_TOKEN || "";
+  const env = { ...process.env };
+  if (token) {
+    env.GIT_ASKPASS = path.join(AGENT_ROOT, "config", "git-askpass.cmd");
+    env.GIT_TERMINAL_PROMPT = "0";
+    // Write a tiny askpass that echoes the token
+    const ask = path.join(AGENT_ROOT, "config", "git-askpass.cmd");
+    if (!existsSync(path.dirname(ask))) mkdirSync(path.dirname(ask), { recursive: true });
+    writeFileSync(ask, `@echo off\r\necho ${token}\r\n`, { mode: 0o700 });
+  }
+  return env;
+}
+
+if (req.method === "POST" && url.pathname === "/api/tool/apply") {
     const body = JSON.parse(await readBody(req) || "{}");
     const root = rootForSession(body.sessionId);
     pruneToolApprovals();
@@ -1270,13 +1291,29 @@ if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPa
           return send(res, 200, { ok: true, output: String(r.stdout || "").slice(0, 4000) });
         }
         if (tool.tool === "git_pull") {
-          const r = await exec("git", ["pull", "--ff-only"], { cwd: root, timeout: 60000 });
+          const r = await exec("git", ["pull", "--ff-only"], { cwd: root, timeout: 60000, env: gitEnv() });
           return send(res, 200, { ok: true, output: String(r.stdout || r.stderr || "").slice(0, 4000) });
         }
         if (tool.tool === "git_push") {
           if (!safeName(tool.remote) || !safeName(tool.branch)) return send(res, 400, { error: "invalid remote or branch" });
-          const r = await exec("git", ["push", tool.remote, tool.branch], { cwd: root, timeout: 60000 });
+          const r = await exec("git", ["push", tool.remote, tool.branch], { cwd: root, timeout: 60000, env: gitEnv() });
           return send(res, 200, { ok: true, output: String(r.stdout || r.stderr || "").slice(0, 4000) });
+        }
+        if (tool.tool === "git_pr") {
+          const token = getSecret(AGENT_ROOT, "GITHUB_TOKEN") || process.env.GITHUB_TOKEN;
+          if (!token) return send(res, 400, { error: "no GITHUB_TOKEN in secrets" });
+          const remote = await exec("git", ["remote", "get-url", "origin"], { cwd: root });
+          const m = String(remote.stdout || "").match(/github\.com[:/]([^/]+)\/([^/.]+)/);
+          if (!m) return send(res, 400, { error: "origin is not a github repo" });
+          const head = (await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root })).stdout.trim();
+          const res2 = await fetch(`https://api.github.com/repos/${m[1]}/${m[2]}/pulls`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+            body: JSON.stringify({ title: tool.title, body: tool.body, head, base: tool.base }),
+          });
+          const j = await res2.json();
+          if (!res2.ok) return send(res, 400, { error: j.message || "pr failed" });
+          return send(res, 200, { ok: true, url: j.html_url, number: j.number });
         }
         if (tool.tool === "git_clone") {
           if (!/^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(\.git)?$/.test(tool.url)) return send(res, 400, { error: "only https github urls" });
@@ -1293,7 +1330,28 @@ if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPa
   }
 
   
-  if (req.method === "GET" && url.pathname === "/api/tasks") {
+  
+  if (req.method === "GET" && url.pathname === "/api/selftest") {
+    const checks = {};
+    try {
+      const r = await fetch(OLLAMA + "/api/tags", { signal: AbortSignal.timeout(3000) });
+      checks.ollama = r.ok ? "up" : "down";
+    } catch { checks.ollama = "down"; }
+    checks.model = MODEL;
+    checks.shell = process.env.CA_ALLOW_SHELL === "1" ? "on" : "off";
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const exec = promisify(execFile);
+      const root = rootForSession(url.searchParams.get("sessionId"));
+      const g = await exec("git", ["status", "--short"], { cwd: root, timeout: 5000 });
+      checks.git = "ok";
+    } catch (e) { checks.git = "fail: " + String(e.message || e).slice(0, 80); }
+    checks.token = getSecret(AGENT_ROOT, "GITHUB_TOKEN") ? "set" : "missing";
+    return send(res, 200, checks);
+  }
+
+if (req.method === "GET" && url.pathname === "/api/tasks") {
     return send(res, 200, { tasks: listTasks() });
   }
   if (req.method === "POST" && url.pathname === "/api/tasks") {
@@ -1622,6 +1680,22 @@ if (req.method === "GET" && url.pathname === "/api/health") {
 
   send(res, 404, { error: "not found" });
 }
+
+
+// Background task runner: every 60s, if idle, pick the highest-priority open task marked background and note it.
+let lastBg = 0;
+setInterval(() => {
+  if (Date.now() - lastBg < 60000) return;
+  lastBg = Date.now();
+  try {
+    const tasks = listTasks().filter(t => t.status === "open" && t.type === "background");
+    if (!tasks.length) return;
+    tasks.sort((a, b) => (a.priority || 5) - (b.priority || 5));
+    const next = tasks[0];
+    appendFileSync(path.join(AGENT_ROOT, "audit", "bg-tasks.log"),
+      new Date().toISOString() + " ready " + next.id + " " + next.title + "\n");
+  } catch {}
+}, 30000);
 
 server.listen(PORT, HOST, () => {
   console.log(`Code Agent (local Ollama) http://${HOST}:${PORT}/`);

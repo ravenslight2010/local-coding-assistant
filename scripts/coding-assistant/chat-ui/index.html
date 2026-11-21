@@ -118,6 +118,7 @@
     <button id="testBtn" title="Plan tests">Test</button>
     <button id="nextTask" title="Load next open task">Next task</button>
     <button id="secBtn" title="Secrets">Secrets</button>
+    <button id="selfBtn" title="Self test">Self-test</button>
     <button id="memSearch" title="Search memory">Recall</button>
   </header>
   <main>
@@ -1092,6 +1093,14 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
     }
     initialize();
     setInterval(loadTasks, 15000);
-  </script>
+  
+    document.getElementById("selfBtn").addEventListener("click", async () => {
+      const r = await fetch("/api/selftest?sessionId=" + encodeURIComponent(currentSession || ""));
+      const j = await r.json();
+      const lines = Object.entries(j).map(([k,v]) => k + ": " + v).join("\n");
+      alert("Self-test\n" + lines);
+    });
+
+</script>
 </body>
 </html>

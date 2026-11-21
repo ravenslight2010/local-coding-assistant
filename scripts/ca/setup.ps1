@@ -204,6 +204,10 @@ function Copy-App([string]$Repo, [string]$Model) {
 }
 
 function Write-RunScript([string]$Repo, [string]$Model) {
+  $pinDir = Join-Path $AgentRoot "source"
+  if (-not (Test-Path $pinDir)) { New-Item -ItemType Directory -Path $pinDir | Out-Null }
+  $ver = if ($env:CA_VERSION) { $env:CA_VERSION } else { "unknown" }
+  Set-Content -LiteralPath (Join-Path $pinDir "pin.txt") -Value $ver -Encoding ASCII
   $run = Join-Path $AgentRoot "run.ps1"
   $app = Join-Path $AgentRoot "app"
   $lines = @(
@@ -217,6 +221,20 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     '$env:RUNCALC_REPO = $repo'
     '$env:CA_AGENT_ROOT = $PSScriptRoot'
     '$env:CA_ALLOW_SHELL = ''1'''
+    '# Auto-update: if a newer pin is published, re-run Get-CodeAgent.cmd once'
+    '$pinFile = Join-Path $PSScriptRoot ''source\pin.txt'''
+    '$remote = ''''https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/Get-CodeAgent.cmd'''''
+    'try {'
+    '  $tmp = Join-Path $env:TEMP ''ca-remote.cmd'''
+    '  Invoke-WebRequest $remote -OutFile $tmp -UseBasicParsing -TimeoutSec 8'
+    '  $remoteVer = (Select-String -Path $tmp -Pattern ''set "VERSION=([a-f0-9]+)'' | Select-Object -First 1).Matches.Groups[1].Value'
+    '  $localVer = if (Test-Path $pinFile) { (Get-Content $pinFile -Raw).Trim() } else { '''' }'
+    '  if ($remoteVer -and $remoteVer -ne $localVer) {'
+    '    Write-Host "Update available: $remoteVer"'
+    '    & $tmp'
+    '    exit 0'
+    '  }'
+    '} catch {}'
     'try { Invoke-WebRequest http://127.0.0.1:11434/api/tags -UseBasicParsing -TimeoutSec 2 | Out-Null } catch { Start-Process ollama -ArgumentList serve -WindowStyle Hidden; Start-Sleep 2 }'
     '$server = Join-Path $app ''ui\server.mjs'''
     'if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Write-Error ''Node missing. Run setup again.''; exit 1 }'

@@ -84,3 +84,10 @@ Get-CodeAgent.cmd /model qwen2.5-coder:7b
 ```
 
 Or set `CA_MODEL` before running setup.
+
+
+## New in this build
+- Shell on by default. Git status/pull/push/clone/PR tools (token from Secrets as GITHUB_TOKEN).
+- Auto-update check on launch.
+- Self-test button.
+- Background tasks (type=background) are logged when idle.

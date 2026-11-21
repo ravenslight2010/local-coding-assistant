@@ -41,6 +41,7 @@ echo %MODE% Code Agent...
 echo Config, memory, and secrets are kept.
 
 echo Downloading verified Code Agent source %VERSION%...
+set "CA_VERSION=%VERSION%"
 powershell -NoProfile -Command ^
   "$ErrorActionPreference='Stop';" ^
   "$archive=Join-Path $env:TEMP 'code-agent-%VERSION%.zip';" ^
