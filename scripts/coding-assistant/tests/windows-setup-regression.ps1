@@ -1,3 +1,5 @@
+param([switch]$VerifyBrowsers)
+
 $ErrorActionPreference = "Stop"
 $setup = Join-Path $PSScriptRoot "../../ca/setup.ps1"
 $parseErrors = $null
@@ -40,6 +42,39 @@ process.exit(7);
   if ($actual -ne "install chromium firefox webkit") { throw "The pinned Playwright CLI was not called with the expected arguments." }
   if (-not ($messages -match "Playwright browser install exited 7")) { throw "Optional browser download failure was not reported." }
   Write-Host "PASS: Node runs the pinned optional browser CLI, and failure is nonfatal"
+
+  if ($VerifyBrowsers) {
+    $runtime = Join-Path $PSScriptRoot "../chat-ui/node_modules/playwright-core"
+    Remove-Item -LiteralPath $cliDir -Recurse -Force
+    Copy-Item -LiteralPath $runtime -Destination $cliDir -Recurse
+    $messages = @()
+    Ensure-TestingStack
+    if ("Playwright browsers ready" -notin $messages) { throw ($messages -join "`n") }
+
+    $browserCheck = Join-Path $AgentRoot "app/ui/check-browsers.cjs"
+    Set-Content -LiteralPath $browserCheck -Value @'
+const assert = require("node:assert/strict");
+const playwright = require("playwright-core");
+
+(async () => {
+  for (const name of ["chromium", "firefox", "webkit"]) {
+    const browser = await playwright[name].launch();
+    try {
+      const page = await browser.newPage();
+      await page.setContent("<title>Code Agent browser check</title>");
+      assert.equal(await page.title(), "Code Agent browser check");
+      console.log(`PASS: ${name} launched and rendered a page`);
+    } finally {
+      await browser.close();
+    }
+  }
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+'@
+    & node $browserCheck
+    if ($LASTEXITCODE -ne 0) { throw "One or more optional Playwright browsers failed to launch." }
+  }
 } finally {
   Remove-Item -LiteralPath $AgentRoot -Recurse -Force
 }
+
+exit 0
