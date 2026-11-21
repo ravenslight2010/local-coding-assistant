@@ -32,6 +32,7 @@ test("canonical Windows bundle is complete and its packaged server starts", { sk
     for (const relative of [
       "CA-Setup.cmd",
       "scripts/ca/setup.ps1",
+      "scripts/ca/Choose-Model.ps1",
       "scripts/ca/Select-CodingModel.ps1",
       "scripts/coding-assistant/chat-ui/server.mjs",
       "scripts/coding-assistant/chat-ui/index.html",
