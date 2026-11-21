@@ -266,6 +266,33 @@ function Verify-Installation([string]$Model) {
   Info "Node, Ollama, model, and application payload verified"
 }
 
+
+function Ensure-TestingStack {
+  Step "Free testing stack"
+  $ui = Join-Path $AgentRoot "app\ui"
+  if (-not (Test-Path $ui)) { Info "UI not installed yet; skipping browser install"; return }
+  Push-Location $ui
+  try {
+    if (HasCmd "npx") {
+      Info "Installing Playwright browsers (chromium, firefox, webkit)"
+      $proc = Start-Process -FilePath "npx" -ArgumentList @("playwright", "install", "chromium", "firefox", "webkit") -NoNewWindow -Wait -PassThru
+      if ($proc.ExitCode -ne 0) { Info "Playwright browser install exited $($proc.ExitCode); tests may need a later run" }
+      else { Info "Playwright browsers ready" }
+    } else {
+      Info "npx missing; skip Playwright browsers"
+    }
+  } finally { Pop-Location }
+
+  if (HasCmd "adb") { Info "Android platform-tools present" }
+  else { Info "Android AVD not installed. Install Android Studio and create one AVD for real Android tests." }
+
+  $hyperv = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -ErrorAction SilentlyContinue
+  if ($hyperv -and $hyperv.State -eq "Enabled") { Info "Hyper-V available for Windows guests" }
+  elseif (HasCmd "VBoxManage") { Info "VirtualBox available for OS guests" }
+  else { Info "No free VM tool detected. Install VirtualBox or enable Hyper-V if you need OS guests." }
+}
+
+
 try {
   Step "Code Agent Setup"
   $repo = Get-Repo
@@ -277,6 +304,7 @@ try {
   $model = Select-Model
   Ensure-Model $model
   Copy-App $repo $model
+  Ensure-TestingStack
   Create-Shortcuts
   Verify-Installation $model
   if ($LaunchChat -and -not $NoLaunch) {

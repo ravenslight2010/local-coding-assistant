@@ -6,7 +6,7 @@
 - Commit: `adc740bc94003d704b5d04faefc7a0d97e70241d`
 - Archive SHA-256: `6227dfcc08008a4867888af114bc7a791e28e93f8619969b7dd4d2a347b35486`
 
-This pin includes Auto mode, secret store, workflows, testing ladder, include-in-current-task, and the hardware model menu.
+This pin includes Auto mode, secret store, workflows, testing ladder, include-in-current-task, and the hardware model menu and free testing stack (Playwright browsers).
 
 ## How to run
 Double-click `Get-CodeAgent.cmd`. It requests Administrator, verifies the zip, then runs setup.
