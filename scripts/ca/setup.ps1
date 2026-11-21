@@ -216,6 +216,7 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     'foreach ($p in @("$env:ProgramFiles\nodejs", "$env:LOCALAPPDATA\Programs\Ollama", "$env:ProgramFiles\Ollama")) { if (Test-Path $p) { $env:Path = "$p;$env:Path" } }'
     '$env:RUNCALC_REPO = $repo'
     '$env:CA_AGENT_ROOT = $PSScriptRoot'
+    '$env:CA_ALLOW_SHELL = ''1'''
     'try { Invoke-WebRequest http://127.0.0.1:11434/api/tags -UseBasicParsing -TimeoutSec 2 | Out-Null } catch { Start-Process ollama -ArgumentList serve -WindowStyle Hidden; Start-Sleep 2 }'
     '$server = Join-Path $app ''ui\server.mjs'''
     'if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Write-Error ''Node missing. Run setup again.''; exit 1 }'

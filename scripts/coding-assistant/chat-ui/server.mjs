@@ -178,6 +178,20 @@ Read-only tools:
 \`\`\`tool
 {"tool":"outline","path":"relative/file"}
 \`\`\`
+Git tools (status is free; pull/push/clone need approval):
+\`\`\`tool
+{"tool":"git_status"}
+\`\`\`
+\`\`\`tool
+{"tool":"git_pull"}
+\`\`\`
+\`\`\`tool
+{"tool":"git_push","remote":"origin","branch":"main"}
+\`\`\`
+\`\`\`tool
+{"tool":"git_clone","url":"https://github.com/org/repo.git","dest":"folder-name"}
+\`\`\`
+
 Write tools (approval required):
 \`\`\`tool
 {"tool":"edit","path":"relative/file","old":"exact","new":"replacement"}
@@ -229,6 +243,14 @@ function normalizeTool(root, tool) {
   }
   if (tool.tool === "shell" && process.env.CA_ALLOW_SHELL === "1" && typeof tool.command === "string" && tool.command.trim() && tool.command.length <= 2000) {
     return { tool: "shell", command: tool.command };
+  }
+  if (tool.tool === "git_status") return { tool: "git_status" };
+  if (tool.tool === "git_pull") return { tool: "git_pull" };
+  if (tool.tool === "git_push" && typeof tool.remote === "string" && typeof tool.branch === "string") {
+    return { tool: "git_push", remote: tool.remote.slice(0, 40), branch: tool.branch.slice(0, 80) };
+  }
+  if (tool.tool === "git_clone" && typeof tool.url === "string" && typeof tool.dest === "string") {
+    return { tool: "git_clone", url: tool.url.slice(0, 200), dest: tool.dest.slice(0, 200) };
   }
   return null;
 }
@@ -1236,6 +1258,36 @@ if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPa
       if (termination) await termination;
       const audited = recordToolAudit(approval, { outcome: timedOut ? "timeout" : "completed", code, timedOut, truncated });
       return send(res, 200, { ok: code === 0 && !timedOut, code, timedOut, truncated, output: out, audited });
+    }
+    if (tool.tool === "git_status" || tool.tool === "git_pull" || tool.tool === "git_push" || tool.tool === "git_clone") {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const exec = promisify(execFile);
+      const safeName = (s) => /^[A-Za-z0-9._/-]+$/.test(s) && !s.includes("..");
+      try {
+        if (tool.tool === "git_status") {
+          const r = await exec("git", ["status", "--short", "--branch"], { cwd: root, timeout: 15000 });
+          return send(res, 200, { ok: true, output: String(r.stdout || "").slice(0, 4000) });
+        }
+        if (tool.tool === "git_pull") {
+          const r = await exec("git", ["pull", "--ff-only"], { cwd: root, timeout: 60000 });
+          return send(res, 200, { ok: true, output: String(r.stdout || r.stderr || "").slice(0, 4000) });
+        }
+        if (tool.tool === "git_push") {
+          if (!safeName(tool.remote) || !safeName(tool.branch)) return send(res, 400, { error: "invalid remote or branch" });
+          const r = await exec("git", ["push", tool.remote, tool.branch], { cwd: root, timeout: 60000 });
+          return send(res, 200, { ok: true, output: String(r.stdout || r.stderr || "").slice(0, 4000) });
+        }
+        if (tool.tool === "git_clone") {
+          if (!/^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(\.git)?$/.test(tool.url)) return send(res, 400, { error: "only https github urls" });
+          if (!safeName(tool.dest)) return send(res, 400, { error: "invalid dest" });
+          const dest = path.resolve(root, "..", tool.dest);
+          const r = await exec("git", ["clone", tool.url, dest], { timeout: 120000 });
+          return send(res, 200, { ok: true, dest, output: String(r.stdout || r.stderr || "").slice(0, 4000) });
+        }
+      } catch (err) {
+        return send(res, 400, { error: String(err.message || err).slice(0, 500) });
+      }
     }
     return send(res, 400, { error: "unknown tool" });
   }
