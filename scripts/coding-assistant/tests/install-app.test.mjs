@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -151,7 +151,7 @@ test("Install app shows the selected repo, cancels without running it, and compl
     });
     await button.click();
     const prompt = await cancel;
-    assert.ok(prompt.includes(root), prompt);
+    assert.ok(prompt.includes(realpathSync.native(root)), prompt);
     assert.match(prompt, /npm install/);
     assert.equal(existsSync(path.join(root, "installed.txt")), false);
     const confirm = page.waitForEvent("dialog").then((dialog) => dialog.accept());

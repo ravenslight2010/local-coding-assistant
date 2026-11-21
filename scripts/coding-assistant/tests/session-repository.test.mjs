@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -100,11 +100,11 @@ test("two sessions retain independent repositories for files, tools, edits, and 
   for (const [sessionId, repo] of [["first-session", firstRepo], ["second-session", secondRepo]]) {
     const response = await post("/api/repo", { sessionId, path: repo });
     assert.equal(response.status, 200);
-    assert.equal((await response.json()).root, realpathSync(repo));
+    assert.equal((await response.json()).root, realpathSync.native(repo));
   }
 
   const restored = await (await fetch(baseUrl + "/api/session?id=second-session")).json();
-  assert.equal(restored.repo, realpathSync(secondRepo));
+  assert.equal(restored.repo, realpathSync.native(secondRepo));
 
   for (const [sessionId, repo, expected] of [["first-session", firstRepo, "first\n"], ["second-session", secondRepo, "second\n"]]) {
     const file = await fetch(baseUrl + `/api/file?path=identity.txt&sessionId=${sessionId}`);
@@ -118,7 +118,7 @@ test("two sessions retain independent repositories for files, tools, edits, and 
     const chat = await post("/api/chat", { sessionId, messages: [], stream: false });
     assert.equal(chat.status, 200);
     const prompt = prompts.at(-1);
-    assert.equal(prompt.messages[0].content.includes(`Current repo: ${realpathSync(repo)}`), true);
+    assert.equal(prompt.messages[0].content.includes(`Current repo: ${realpathSync.native(repo)}`), true);
   }
 
   const wrongSessionPreparation = await post("/api/tool/prepare", {
@@ -150,10 +150,12 @@ test("folder browsing lists only directories and requires a same-origin request"
   const response = await post("/api/browse", { path: tempRoot });
   assert.equal(response.status, 200);
   const result = await response.json();
-  assert.equal(result.path, realpathSync(tempRoot));
+  assert.equal(result.path, realpathSync.native(tempRoot));
   assert.equal(result.isRepository, false);
-  assert.ok(result.folders.some((folder) => folder.path === realpathSync(secondRepo)));
+  assert.ok(result.folders.some((folder) => folder.path === realpathSync.native(secondRepo)));
   assert.ok(!result.folders.some((folder) => folder.name === "not-a-folder.txt"));
+  const home = await (await post("/api/browse", { sessionId: "second-session" })).json();
+  assert.ok(home.places.some((place) => place.label === "Current repository" && place.path === realpathSync.native(secondRepo)));
   const repository = await post("/api/browse", { path: secondRepo });
   assert.equal((await repository.json()).isRepository, true);
   assert.equal((await post("/api/browse", { path: "relative/path" })).status, 400);
@@ -162,6 +164,27 @@ test("folder browsing lists only directories and requires a same-origin request"
     method: "POST",
     headers: { Origin: "https://example.invalid", "Content-Type": "application/json" },
     body: JSON.stringify({ path: tempRoot }),
+  })).status, 403);
+});
+
+test("Windows folder browsing follows local directory junctions", { skip: process.platform !== "win32" }, async () => {
+  const junction = path.join(tempRoot, "linked-project");
+  symlinkSync(secondRepo, junction, "junction");
+  const result = await (await post("/api/browse", { path: tempRoot })).json();
+  assert.ok(result.folders.some((folder) => folder.name === "linked-project"));
+  assert.equal((await (await post("/api/browse", { path: junction })).json()).path, realpathSync.native(secondRepo));
+});
+
+test("GitHub clone refuses non-repository URLs and cross-origin requests", async () => {
+  for (const url of ["file:///tmp/repo", "https://example.test/owner/repo",
+    "https://github.com.evil.test/owner/repo", "https://github.com@evil.test/owner/repo",
+    "https://github.com/owner/repo?query=test", "https://github.com/owner/repo/tree/main"]) {
+    assert.equal((await post("/api/repo/clone", { url })).status, 400);
+  }
+  assert.equal((await fetch(baseUrl + "/api/repo/clone", {
+    method: "POST",
+    headers: { Origin: "https://example.invalid", "Content-Type": "application/json" },
+    body: JSON.stringify({ url: "https://github.com/owner/repo" }),
   })).status, 403);
 });
 
@@ -188,9 +211,14 @@ test("Browse opens inside the app and selects a repository at desktop and phone 
       await dialog.waitFor({ state: "hidden" });
       assert.equal(await browseButton.evaluate((button) => document.activeElement === button), true);
       await browseButton.click();
+      const places = dialog.getByLabel("Jump to a location");
+      await places.locator("option", { hasText: "Current repository" }).waitFor({ state: "attached" });
+      await places.selectOption({ label: "Current repository" });
+      await dialog.getByText(/Repository found/).waitFor();
       await folderPath.fill(path.join(tempRoot, "missing"));
       await folderPath.press("Enter");
       await dialog.getByText(/Couldn’t open the folder/).waitFor();
+      assert.equal(await dialog.getByRole("button", { name: "Up one folder" }).isEnabled(), true);
       await folderPath.fill(tempRoot);
       await folderPath.press("Enter");
       const useFolder = dialog.getByRole("button", { name: "Use this folder" });
@@ -202,7 +230,19 @@ test("Browse opens inside the app and selects a repository at desktop and phone 
       await useFolder.click();
       await dialog.waitFor({ state: "hidden" });
       const saved = await (await fetch(baseUrl + "/api/session?id=first-session")).json();
-      assert.equal(saved.repo, realpathSync(secondRepo));
+      assert.equal(saved.repo, realpathSync.native(secondRepo));
+      await page.route("**/api/repo/clone", async (route) => {
+        assert.deepEqual(route.request().postDataJSON(), { url: "https://github.com/example/project" });
+        await route.fulfill({ json: { root: realpathSync.native(firstRepo) } });
+      });
+      await browseButton.click();
+      await dialog.getByText("Clone from GitHub", { exact: true }).click();
+      const githubUrl = dialog.getByRole("textbox", { name: "GitHub repository URL" });
+      await githubUrl.fill("https://github.com/example/project");
+      await githubUrl.press("Enter");
+      await dialog.waitFor({ state: "hidden" });
+      const afterClone = await (await fetch(baseUrl + "/api/session?id=first-session")).json();
+      assert.equal(afterClone.repo, realpathSync.native(firstRepo));
       await page.close();
     }
   } finally {

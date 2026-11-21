@@ -4,7 +4,7 @@
  * Binds 127.0.0.1. Optional search. Sessions, tools with approval, gold-set helper.
  */
 import http from "node:http";
-import { readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, appendFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
 import path from "node:path";
@@ -17,7 +17,8 @@ import { listWorkflows, getWorkflow } from "./lib/workflows.mjs";
 import { discoverTests, planFor } from "./lib/testing.mjs";
 import { gitEnvironment } from "./lib/git-auth.mjs";
 import { createInstaller, detectInstall } from "./lib/install-app.mjs";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,6 +38,9 @@ function findRepoRoot(start) {
 const DEFAULT_ROOT = findRepoRoot(__dirname);
 
 const AGENT_ROOT = process.env.CA_AGENT_ROOT || path.join(path.dirname(DEFAULT_ROOT), "agent");
+const IMPORTS_DIR = path.join(AGENT_ROOT, "repositories");
+const runGit = promisify(execFile);
+let importingRepository = false;
 const SESSIONS_DIR = path.join(AGENT_ROOT, "sessions");
 const TASKS_DIR = path.join(AGENT_ROOT, "tasks");
 const TASKS_DONE = path.join(TASKS_DIR, "done");
@@ -613,6 +617,33 @@ function hasRepositoryMarker(root) {
   return existsSync(path.join(root, "package.json")) || existsSync(path.join(root, ".git"));
 }
 
+function isLocalFolderPath(folder) {
+  return typeof folder === "string" && folder.length <= 4096 && !folder.includes("\0") &&
+    path.isAbsolute(folder) && (process.platform !== "win32" || /^[a-z]:[/\\](?![/\\])/i.test(folder));
+}
+
+async function repositoryPlaces(current) {
+  const home = homedir();
+  const oneDrive = process.env.OneDrive;
+  const candidates = [
+    ["Current repository", current],
+    ...["Desktop", "Documents", "Downloads"].map((name) => [name, path.join(home, name)]),
+    ["OneDrive", oneDrive],
+    ...["Desktop", "Documents"].map((name) => [`OneDrive ${name}`, oneDrive && path.join(oneDrive, name)]),
+    ["Cloned repositories", IMPORTS_DIR],
+    ...[...new Set([path.parse(home).root, path.parse(current).root, process.env.SystemDrive && `${process.env.SystemDrive}\\`])]
+      .filter(isLocalFolderPath).map((root) => [process.platform === "win32" ? `Drive ${root.slice(0, 2)}` : "File system", root]),
+  ];
+  return (await Promise.all(candidates.filter(([, target]) => isLocalFolderPath(target))
+    .map(async ([label, target]) => {
+      try {
+        const resolved = await realpath(target);
+        if (isLocalFolderPath(resolved) && (await stat(resolved)).isDirectory()) return { label, path: resolved };
+      } catch {}
+      return null;
+    }))).filter(Boolean);
+}
+
 function canonicalRepositoryRoot(candidate) {
   if (typeof candidate !== "string" || !candidate || candidate.length > 4096) throw new Error("invalid repository");
   const resolved = path.resolve(candidate);
@@ -620,7 +651,7 @@ function canonicalRepositoryRoot(candidate) {
   if (!hasRepositoryMarker(resolved)) {
     throw new Error("repository must contain package.json or .git");
   }
-  return realpathSync(resolved);
+  return realpathSync.native(resolved);
 }
 
 function rootForSession(sessionId) {
@@ -1139,17 +1170,17 @@ async function handleRequest(req, res) {
   if (req.method === "POST" && url.pathname === "/api/browse") {
     const body = JSON.parse(await readBody(req) || "{}");
     const folder = body?.path ?? homedir();
-    if (typeof folder !== "string" || folder.length > 4096 || folder.includes("\0") || !path.isAbsolute(folder) ||
-      (process.platform === "win32" && !/^[a-z]:[/\\](?![/\\])/i.test(folder))) {
+    if (!isLocalFolderPath(folder)) {
       return send(res, 400, { error: "Enter an absolute local folder path." });
     }
     try {
-      const root = realpathSync(folder);
-      if (process.platform === "win32" && !/^[a-z]:[/\\]/i.test(root)) {
+      const root = await realpath(folder);
+      if (!isLocalFolderPath(root)) {
         return send(res, 400, { error: "Choose a folder on a local drive." });
       }
       const entries = await readdir(root, { withFileTypes: true });
-      const folders = entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      const folders = entries.filter((entry) => (entry.isDirectory() ||
+        (process.platform === "win32" && entry.isSymbolicLink())) && !entry.name.startsWith("."))
         .sort((a, b) => a.name.localeCompare(b.name));
       const limit = 250;
       const parent = path.dirname(root);
@@ -1157,11 +1188,47 @@ async function handleRequest(req, res) {
         path: root,
         parent: parent === root ? null : parent,
         isRepository: hasRepositoryMarker(root),
+        ...(body?.path == null ? { places: await repositoryPlaces(loadSession(body?.sessionId)?.repo || DEFAULT_ROOT) } : {}),
         truncated: folders.length > limit,
         folders: folders.slice(0, limit).map((entry) => ({ name: entry.name, path: path.join(root, entry.name) })),
       });
     } catch {
       return send(res, 400, { error: "Could not read this folder. Check the path and permissions." });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/repo/clone") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const match = typeof body?.url === "string" && body.url.length <= 300 &&
+      /^https:\/\/github\.com\/([a-z0-9][a-z0-9-]{0,38})\/([a-z0-9_][a-z0-9_.-]{0,99})\/?$/i.exec(body.url.trim());
+    const repo = match && match[2].replace(/\.git$/i, "");
+    if (!repo || repo.endsWith(".")) {
+      return send(res, 400, { error: "Enter a GitHub repository URL like https://github.com/owner/repo." });
+    }
+    if (importingRepository) return send(res, 429, { error: "A GitHub clone is already running." });
+    importingRepository = true;
+    let checkout;
+    let completed = false;
+    try {
+      await mkdir(IMPORTS_DIR, { recursive: true });
+      // Use a new directory for every clone; never touch an existing checkout.
+      checkout = await mkdtemp(path.join(IMPORTS_DIR, `${match[1].slice(0, 24)}--${repo.slice(0, 40)}--`));
+      await runGit("git", [
+        "-c", "http.followRedirects=false", "clone", "--depth", "1", "--template=", "--",
+        `https://github.com/${match[1]}/${repo}.git`, checkout,
+      ], { cwd: IMPORTS_DIR, env: {
+        ...gitEnv(), GIT_ALLOW_PROTOCOL: "https", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+      }, timeout: 120000, windowsHide: true });
+      const root = canonicalRepositoryRoot(checkout);
+      completed = true;
+      return send(res, 200, { root });
+    } catch (error) {
+      if (error.code === "ENOENT") return send(res, 503, { error: "Git or the local checkout folder could not be found. Check that Git for Windows is installed." });
+      if (error.killed) return send(res, 504, { error: "Clone timed out. Check your network connection and try again." });
+      return send(res, 502, { error: "Could not clone this repository. Check the URL, internet connection, and GitHub access." });
+    } finally {
+      if (checkout && !completed) await rm(checkout, { recursive: true, force: true }).catch(() => {});
+      importingRepository = false;
     }
   }
 
