@@ -651,7 +651,7 @@ function canonicalRepositoryRoot(candidate) {
   if (!hasRepositoryMarker(resolved)) {
     throw new Error("repository must contain package.json or .git");
   }
-  return realpathSync(resolved);
+  return realpathSync.native(resolved);
 }
 
 function rootForSession(sessionId) {

@@ -100,11 +100,11 @@ test("two sessions retain independent repositories for files, tools, edits, and 
   for (const [sessionId, repo] of [["first-session", firstRepo], ["second-session", secondRepo]]) {
     const response = await post("/api/repo", { sessionId, path: repo });
     assert.equal(response.status, 200);
-    assert.equal((await response.json()).root, realpathSync(repo));
+    assert.equal((await response.json()).root, realpathSync.native(repo));
   }
 
   const restored = await (await fetch(baseUrl + "/api/session?id=second-session")).json();
-  assert.equal(restored.repo, realpathSync(secondRepo));
+  assert.equal(restored.repo, realpathSync.native(secondRepo));
 
   for (const [sessionId, repo, expected] of [["first-session", firstRepo, "first\n"], ["second-session", secondRepo, "second\n"]]) {
     const file = await fetch(baseUrl + `/api/file?path=identity.txt&sessionId=${sessionId}`);
@@ -150,12 +150,12 @@ test("folder browsing lists only directories and requires a same-origin request"
   const response = await post("/api/browse", { path: tempRoot });
   assert.equal(response.status, 200);
   const result = await response.json();
-  assert.equal(result.path, realpathSync(tempRoot));
+  assert.equal(result.path, realpathSync.native(tempRoot));
   assert.equal(result.isRepository, false);
-  assert.ok(result.folders.some((folder) => folder.path === realpathSync(secondRepo)));
+  assert.ok(result.folders.some((folder) => folder.path === realpathSync.native(secondRepo)));
   assert.ok(!result.folders.some((folder) => folder.name === "not-a-folder.txt"));
   const home = await (await post("/api/browse", { sessionId: "second-session" })).json();
-  assert.ok(home.places.some((place) => place.label === "Current repository" && place.path === realpathSync(secondRepo)));
+  assert.ok(home.places.some((place) => place.label === "Current repository" && place.path === realpathSync.native(secondRepo)));
   const repository = await post("/api/browse", { path: secondRepo });
   assert.equal((await repository.json()).isRepository, true);
   assert.equal((await post("/api/browse", { path: "relative/path" })).status, 400);
@@ -172,7 +172,7 @@ test("Windows folder browsing follows local directory junctions", { skip: proces
   symlinkSync(secondRepo, junction, "junction");
   const result = await (await post("/api/browse", { path: tempRoot })).json();
   assert.ok(result.folders.some((folder) => folder.name === "linked-project"));
-  assert.equal((await (await post("/api/browse", { path: junction })).json()).path, realpathSync(secondRepo));
+  assert.equal((await (await post("/api/browse", { path: junction })).json()).path, realpathSync.native(secondRepo));
 });
 
 test("GitHub clone refuses non-repository URLs and cross-origin requests", async () => {
@@ -230,10 +230,10 @@ test("Browse opens inside the app and selects a repository at desktop and phone 
       await useFolder.click();
       await dialog.waitFor({ state: "hidden" });
       const saved = await (await fetch(baseUrl + "/api/session?id=first-session")).json();
-      assert.equal(saved.repo, realpathSync(secondRepo));
+      assert.equal(saved.repo, realpathSync.native(secondRepo));
       await page.route("**/api/repo/clone", async (route) => {
         assert.deepEqual(route.request().postDataJSON(), { url: "https://github.com/example/project" });
-        await route.fulfill({ json: { root: realpathSync(firstRepo) } });
+        await route.fulfill({ json: { root: realpathSync.native(firstRepo) } });
       });
       await browseButton.click();
       await dialog.getByText("Clone from GitHub", { exact: true }).click();
@@ -242,7 +242,7 @@ test("Browse opens inside the app and selects a repository at desktop and phone 
       await githubUrl.press("Enter");
       await dialog.waitFor({ state: "hidden" });
       const afterClone = await (await fetch(baseUrl + "/api/session?id=first-session")).json();
-      assert.equal(afterClone.repo, realpathSync(firstRepo));
+      assert.equal(afterClone.repo, realpathSync.native(firstRepo));
       await page.close();
     }
   } finally {
