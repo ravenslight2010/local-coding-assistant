@@ -23,13 +23,13 @@ Keep the web clients as they are. Only the server becomes a Windows process.
 
 
 ## Install current app
-When the user says "install the app" or clicks Install app:
+The coder has a universal installer. When the user clicks Install app or says "install the app":
 1. Confirm a repository is selected.
-2. Look for an installer in this order:
-   - scripts/self-host/Install-RunCalcHost.ps1 (v1)
-   - scripts/install-host.ps1
-   - install.ps1
-   - scripts/ca/setup.ps1
-3. Run it with -NonInteractive if present.
-4. Report the script used and the exit code.
-5. If none exist, say the app has no installer yet and offer to draft one.
+2. Detect how to install it, in order:
+   - Known script (scripts/self-host/Install-RunCalcHost.ps1, scripts/install-host.ps1, install.ps1)
+   - Docker (docker-compose.yml / compose.yml / Dockerfile)
+   - Node (package.json; uses pnpm/yarn/npm based on lockfile; runs start or dev)
+   - Python (requirements.txt or pyproject.toml)
+   - Static (index.html; serves on port 3000)
+3. Run the detected plan and report the kind, command, and exit code.
+4. If nothing matches, say the repo type is not recognized.

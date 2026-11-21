@@ -1145,7 +1145,7 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
         body: JSON.stringify({ sessionId: currentSession || "" })
       });
       const j = await r.json();
-      alert(j.ok ? "Installed via " + (j.script || "installer") : ("Install failed: " + (j.error || j.output || "unknown")));
+      alert(j.ok ? ("Installed (" + (j.plan?.kind || "script") + ")") : ("Install failed: " + (j.error || j.output || "unknown")));
     });
 
 </script>
