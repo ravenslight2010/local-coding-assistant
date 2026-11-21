@@ -68,6 +68,7 @@ before(async () => {
   const env = { ...process.env, RUNCALC_REPO: fixtureRepo, CA_AGENT_ROOT: agentRoot };
   env.CA_ALLOW_SEARCH = "0";
   delete env.CA_ALLOW_SHELL;
+  delete env.GITHUB_TOKEN;
   serverProcess = spawn(process.execPath, [serverScript, "--port", String(port)], {
     cwd: repo,
     env,
@@ -112,6 +113,24 @@ test("rejects cross-origin tool preparation", async () => {
 test("requires JSON for same-origin API writes", async () => {
   const response = await post("/api/tool/prepare", "{}", { "Content-Type": "text/plain" });
   assert.equal(response.status, 415);
+});
+
+test("serves the client-side tool approval policy", async () => {
+  const response = await fetch(baseUrl + "/tool-policy.mjs");
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /canAutoApplyTool/);
+});
+
+test("routes approved git_pr tools to the PR handler", async () => {
+  const preparedResponse = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "git_pr", title: "Test PR", body: "Testing dispatch", base: "main" },
+  }));
+  assert.equal(preparedResponse.status, 200);
+  const { approvalId } = await preparedResponse.json();
+
+  const appliedResponse = await post("/api/tool/apply", JSON.stringify({ approvalId }));
+  assert.equal(appliedResponse.status, 400);
+  assert.deepEqual(await appliedResponse.json(), { error: "no GITHUB_TOKEN in secrets" });
 });
 
 test("web test accepts only explicit local HTTP preview URLs", async () => {

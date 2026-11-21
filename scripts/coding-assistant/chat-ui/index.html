@@ -199,6 +199,7 @@
   </main>
   <script type="module">
     import { consumeChatStream } from "/chat-stream.mjs";
+    import { canAutoApplyTool, supportsCodingLoopTool } from "/tool-policy.mjs";
 
     const log = document.getElementById("log");
     const tree = document.getElementById("tree");
@@ -322,16 +323,18 @@
           const data = await r.json();
           if (!r.ok) throw new Error(data.error || "tool request rejected");
           approvalId = data.approvalId;
+          allow.disabled = false;
           const auto = document.getElementById("autoMode") && document.getElementById("autoMode").checked;
-          if (auto && toolObj.tool !== "shell") {
+          if (auto && canAutoApplyTool(toolObj.tool)) {
             status.textContent = "Auto-applying…";
             allow.click();
             return;
           }
           status.textContent = toolObj.tool === "shell"
             ? "Review the command; it runs only after you allow it."
-            : "Review the exact file change, then allow or deny.";
-          allow.disabled = false;
+            : canAutoApplyTool(toolObj.tool)
+              ? "Review the exact file change, then allow or deny."
+              : "Review this tool action, then allow or deny.";
         })
         .catch((e) => {
           status.textContent = "Cannot approve: " + e.message;
@@ -440,7 +443,7 @@
           continue;
         }
 
-        if (tool.tool !== "edit" && tool.tool !== "shell") {
+        if (!supportsCodingLoopTool(tool.tool)) {
           addMsg("system", "Code loop stopped: unsupported tool request.");
           return;
         }

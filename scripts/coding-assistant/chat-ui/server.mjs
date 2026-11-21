@@ -13,6 +13,7 @@ import { addMemory, searchMemory, listMemory } from "./lib/memory-store.mjs";
 import { trimMessages } from "./lib/trim.mjs";
 import { listWorkflows, getWorkflow } from "./lib/workflows.mjs";
 import { discoverTests, planFor } from "./lib/testing.mjs";
+import { gitEnvironment } from "./lib/git-auth.mjs";
 import { execFileSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -178,7 +179,7 @@ Read-only tools:
 \`\`\`tool
 {"tool":"outline","path":"relative/file"}
 \`\`\`
-Git tools (status is free; pull/push/clone need approval):
+Git tools (status is read-only; pull/push/clone/PR creation need approval):
 \`\`\`tool
 {"tool":"git_status"}
 \`\`\`
@@ -971,6 +972,7 @@ async function handleRequest(req, res) {
       "/manifest.webmanifest": ["manifest.webmanifest", "application/manifest+json; charset=utf-8"],
       "/sw.js": ["sw.js", "application/javascript; charset=utf-8"],
       "/chat-stream.mjs": ["chat-stream.mjs", "application/javascript; charset=utf-8"],
+      "/tool-policy.mjs": ["tool-policy.mjs", "application/javascript; charset=utf-8"],
     };
     const hit = staticMap[url.pathname];
     if (hit) {
@@ -1160,16 +1162,7 @@ if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPa
   
 function gitEnv() {
   const token = getSecret(AGENT_ROOT, "GITHUB_TOKEN") || process.env.GITHUB_TOKEN || "";
-  const env = { ...process.env };
-  if (token) {
-    env.GIT_ASKPASS = path.join(AGENT_ROOT, "config", "git-askpass.cmd");
-    env.GIT_TERMINAL_PROMPT = "0";
-    // Write a tiny askpass that echoes the token
-    const ask = path.join(AGENT_ROOT, "config", "git-askpass.cmd");
-    if (!existsSync(path.dirname(ask))) mkdirSync(path.dirname(ask), { recursive: true });
-    writeFileSync(ask, `@echo off\r\necho ${token}\r\n`, { mode: 0o700 });
-  }
-  return env;
+  return gitEnvironment(process.env, token);
 }
 
 if (req.method === "POST" && url.pathname === "/api/tool/apply") {
@@ -1280,7 +1273,7 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       const audited = recordToolAudit(approval, { outcome: timedOut ? "timeout" : "completed", code, timedOut, truncated });
       return send(res, 200, { ok: code === 0 && !timedOut, code, timedOut, truncated, output: out, audited });
     }
-    if (tool.tool === "git_status" || tool.tool === "git_pull" || tool.tool === "git_push" || tool.tool === "git_clone") {
+    if (tool.tool === "git_status" || tool.tool === "git_pull" || tool.tool === "git_push" || tool.tool === "git_clone" || tool.tool === "git_pr") {
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
       const exec = promisify(execFile);
