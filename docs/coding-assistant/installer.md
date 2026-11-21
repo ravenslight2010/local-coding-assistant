@@ -3,10 +3,10 @@
 ## Current pin
 `Get-CodeAgent.cmd` installs immutable source:
 
-- Commit: `df42095169225b0601f6060ff0b895610acdcc77`
-- Archive SHA-256: `30f8fee12ef2a2b7adb27bde305a9dbb92d5d97394ddbedbce0b8fbb7f096eda`
+- Commit: `fda336ee6534d99de02bd88c35a2668600a5cf41`
+- Archive SHA-256: `248ec247e63745c0781ebe72abdca7f69ddbe3ef4f45a0d3a1452230bdca009d`
 
-This pin includes the Windows launcher and optional browser download fixes, along with the **Install app** confirmation and background launch changes.
+This pin includes the in-app repository folder picker, along with the Windows launcher, optional browser downloads, and **Install app** fixes.
 
 ## How to run
 Double-click `Get-CodeAgent.cmd`. It requests Administrator, verifies the zip, then runs setup.

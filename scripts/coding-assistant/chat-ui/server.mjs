@@ -4,6 +4,8 @@
  * Binds 127.0.0.1. Optional search. Sessions, tools with approval, gold-set helper.
  */
 import http from "node:http";
+import { readdir } from "node:fs/promises";
+import { homedir } from "node:os";
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, appendFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -607,11 +609,15 @@ function saveSession(sess) {
   writeFileSync(sessionFile(sess.id), JSON.stringify(sess, null, 2));
 }
 
+function hasRepositoryMarker(root) {
+  return existsSync(path.join(root, "package.json")) || existsSync(path.join(root, ".git"));
+}
+
 function canonicalRepositoryRoot(candidate) {
   if (typeof candidate !== "string" || !candidate || candidate.length > 4096) throw new Error("invalid repository");
   const resolved = path.resolve(candidate);
   if (!existsSync(resolved) || !statSync(resolved).isDirectory()) throw new Error("invalid repository");
-  if (!existsSync(path.join(resolved, "package.json")) && !existsSync(path.join(resolved, ".git"))) {
+  if (!hasRepositoryMarker(resolved)) {
     throw new Error("repository must contain package.json or .git");
   }
   return realpathSync(resolved);
@@ -1130,23 +1136,32 @@ async function handleRequest(req, res) {
     return send(res, 200, diag);
   }
 
-  if (req.method === "GET" && url.pathname === "/api/browse") {
+  if (req.method === "POST" && url.pathname === "/api/browse") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const folder = body?.path ?? homedir();
+    if (typeof folder !== "string" || folder.length > 4096 || folder.includes("\0") || !path.isAbsolute(folder) ||
+      (process.platform === "win32" && !/^[a-z]:[/\\](?![/\\])/i.test(folder))) {
+      return send(res, 400, { error: "Enter an absolute local folder path." });
+    }
     try {
-      const { execFile } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      const exec = promisify(execFile);
-      const ps = `
-Add-Type -AssemblyName System.Windows.Forms
-$d = New-Object System.Windows.Forms.FolderBrowserDialog
-$d.Description = "Select a repository folder"
-$d.ShowNewFolderButton = $false
-if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }
-`;
-      const { stdout } = await exec("powershell", ["-NoProfile", "-STA", "-Command", ps], { timeout: 120000 });
-      const picked = String(stdout || "").trim();
-      return send(res, 200, { path: picked });
-    } catch (err) {
-      return send(res, 500, { error: err.message || "browse failed" });
+      const root = realpathSync(folder);
+      if (process.platform === "win32" && !/^[a-z]:[/\\]/i.test(root)) {
+        return send(res, 400, { error: "Choose a folder on a local drive." });
+      }
+      const entries = await readdir(root, { withFileTypes: true });
+      const folders = entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const limit = 250;
+      const parent = path.dirname(root);
+      return send(res, 200, {
+        path: root,
+        parent: parent === root ? null : parent,
+        isRepository: hasRepositoryMarker(root),
+        truncated: folders.length > limit,
+        folders: folders.slice(0, limit).map((entry) => ({ name: entry.name, path: path.join(root, entry.name) })),
+      });
+    } catch {
+      return send(res, 400, { error: "Could not read this folder. Check the path and permissions." });
     }
   }
 

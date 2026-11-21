@@ -72,8 +72,8 @@ jobs:
           node-version: '22.23.5'
       - name: Install browser-test runtime
         run: npm ci --prefix scripts/coding-assistant/chat-ui
-      - name: Run Canvas and installer browser tests in Edge
-        run: node --test scripts/coding-assistant/tests/web-test-browser.test.mjs scripts/coding-assistant/tests/install-app.test.mjs
+      - name: Run Canvas, installer, and repository browser tests in Edge
+        run: node --test scripts/coding-assistant/tests/web-test-browser.test.mjs scripts/coding-assistant/tests/install-app.test.mjs scripts/coding-assistant/tests/session-repository.test.mjs
       - name: Test Windows setup and launch optional Playwright browsers
         shell: powershell
         timeout-minutes: 10
