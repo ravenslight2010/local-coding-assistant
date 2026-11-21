@@ -118,7 +118,7 @@ test("two sessions retain independent repositories for files, tools, edits, and 
     const chat = await post("/api/chat", { sessionId, messages: [], stream: false });
     assert.equal(chat.status, 200);
     const prompt = prompts.at(-1);
-    assert.equal(prompt.messages[0].content.includes(`Current repo: ${realpathSync(repo)}`), true);
+    assert.equal(prompt.messages[0].content.includes(`Current repo: ${realpathSync.native(repo)}`), true);
   }
 
   const wrongSessionPreparation = await post("/api/tool/prepare", {
