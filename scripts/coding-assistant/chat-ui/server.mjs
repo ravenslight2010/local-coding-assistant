@@ -4,7 +4,7 @@
  * Binds 127.0.0.1. Optional search. Sessions, tools with approval, gold-set helper.
  */
 import http from "node:http";
-import { mkdir, mkdtemp, readdir, realpath, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, readdir, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, appendFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
 import path from "node:path";
@@ -1205,29 +1205,57 @@ async function handleRequest(req, res) {
     if (!repo || repo.endsWith(".")) {
       return send(res, 400, { error: "Enter a GitHub repository URL like https://github.com/owner/repo." });
     }
+    const owner = match[1].toLowerCase();
+    const parent = body.parent ?? path.join(IMPORTS_DIR, `github-${owner}`);
+    if (!isLocalFolderPath(parent) ||
+      (process.platform === "win32" && (parent.slice(2).includes(":") ||
+        /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(repo)))) {
+      return send(res, 400, { error: "Choose a valid local destination folder and repository name." });
+    }
     if (importingRepository) return send(res, 429, { error: "A GitHub clone is already running." });
     importingRepository = true;
     let checkout;
-    let completed = false;
+    let removeOnFailure = false;
+    const remote = `https://github.com/${owner}/${repo}.git`;
     try {
-      await mkdir(IMPORTS_DIR, { recursive: true });
-      // Use a new directory for every clone; never touch an existing checkout.
-      checkout = await mkdtemp(path.join(IMPORTS_DIR, `${match[1].slice(0, 24)}--${repo.slice(0, 40)}--`));
+      await mkdir(parent, { recursive: true });
+      const directory = await realpath(parent);
+      if (!isLocalFolderPath(directory)) {
+        return send(res, 400, { error: "Choose a destination on a local drive." });
+      }
+      checkout = path.join(directory, repo);
+      try {
+        await mkdir(checkout);
+        removeOnFailure = true;
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        if ((await lstat(checkout)).isDirectory() && existsSync(path.join(checkout, ".git"))) {
+          const existing = await runGit("git", ["config", "--local", "--no-includes", "--get", "remote.origin.url"], {
+            cwd: checkout, timeout: 4000, windowsHide: true,
+          }).catch(() => null);
+          const origin = existing?.stdout.trim().replace(/^git@github\.com:/i, "https://github.com/")
+            .replace(/\/$/, "").replace(/\.git$/i, "").toLowerCase();
+          if (origin === remote.slice(0, -4).toLowerCase()) {
+            return send(res, 200, { root: canonicalRepositoryRoot(checkout) });
+          }
+        }
+        return send(res, 409, { error: "A folder with this repository name already exists. Choose another destination or open the folder from Browse." });
+      }
       await runGit("git", [
-        "-c", "http.followRedirects=false", "clone", "--depth", "1", "--template=", "--",
-        `https://github.com/${match[1]}/${repo}.git`, checkout,
-      ], { cwd: IMPORTS_DIR, env: {
+        "-c", "http.followRedirects=false", "clone", "--depth", "1", "--template=", "--", remote, checkout,
+      ], { cwd: directory, env: {
         ...gitEnv(), GIT_ALLOW_PROTOCOL: "https", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
       }, timeout: 120000, windowsHide: true });
       const root = canonicalRepositoryRoot(checkout);
-      completed = true;
+      removeOnFailure = false;
       return send(res, 200, { root });
     } catch (error) {
       if (error.code === "ENOENT") return send(res, 503, { error: "Git or the local checkout folder could not be found. Check that Git for Windows is installed." });
+      if (["EACCES", "EPERM", "ENOTDIR"].includes(error.code)) return send(res, 400, { error: "Could not create a folder at that destination. Check the path and permissions." });
       if (error.killed) return send(res, 504, { error: "Clone timed out. Check your network connection and try again." });
       return send(res, 502, { error: "Could not clone this repository. Check the URL, internet connection, and GitHub access." });
     } finally {
-      if (checkout && !completed) await rm(checkout, { recursive: true, force: true }).catch(() => {});
+      if (removeOnFailure) await rm(checkout, { recursive: true, force: true }).catch(() => {});
       importingRepository = false;
     }
   }

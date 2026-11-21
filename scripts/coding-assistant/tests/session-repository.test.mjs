@@ -1,6 +1,6 @@
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -186,6 +186,27 @@ test("GitHub clone refuses non-repository URLs and cross-origin requests", async
     headers: { Origin: "https://example.invalid", "Content-Type": "application/json" },
     body: JSON.stringify({ url: "https://github.com/owner/repo" }),
   })).status, 403);
+  assert.equal((await post("/api/repo/clone", {
+    url: "https://github.com/owner/repo", parent: "relative/path",
+  })).status, 400);
+});
+
+test("GitHub clone reopens a matching checkout and protects an unrelated folder", async () => {
+  const parent = path.join(tempRoot, "local repos");
+  const checkout = path.join(parent, "project");
+  mkdirSync(checkout, { recursive: true });
+  const marker = path.join(checkout, "keep.txt");
+  writeFileSync(marker, "keep my changes");
+  const body = { url: "https://github.com/example/project", parent };
+  assert.equal((await post("/api/repo/clone", body)).status, 409);
+  execFileSync("git", ["init", "--quiet"], { cwd: checkout });
+  execFileSync("git", ["remote", "add", "origin", "git@github.com:other/project.git"], { cwd: checkout });
+  assert.equal((await post("/api/repo/clone", body)).status, 409);
+  execFileSync("git", ["remote", "set-url", "origin", "git@github.com:example/project.git"], { cwd: checkout });
+  const response = await post("/api/repo/clone", body);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).root, realpathSync.native(checkout));
+  assert.equal(readFileSync(marker, "utf8"), "keep my changes");
 });
 
 test("Browse opens inside the app and selects a repository at desktop and phone widths", {
@@ -231,14 +252,16 @@ test("Browse opens inside the app and selects a repository at desktop and phone 
       await dialog.waitFor({ state: "hidden" });
       const saved = await (await fetch(baseUrl + "/api/session?id=first-session")).json();
       assert.equal(saved.repo, realpathSync.native(secondRepo));
+      const parent = path.join(tempRoot, "new", "projects");
       await page.route("**/api/repo/clone", async (route) => {
-        assert.deepEqual(route.request().postDataJSON(), { url: "https://github.com/example/project" });
+        assert.deepEqual(route.request().postDataJSON(), { url: "https://github.com/example/project", parent });
         await route.fulfill({ json: { root: realpathSync.native(firstRepo) } });
       });
       await browseButton.click();
       await dialog.getByText("Clone from GitHub", { exact: true }).click();
       const githubUrl = dialog.getByRole("textbox", { name: "GitHub repository URL" });
       await githubUrl.fill("https://github.com/example/project");
+      await dialog.getByRole("textbox", { name: "Save inside folder (optional)" }).fill(parent);
       await githubUrl.press("Enter");
       await dialog.waitFor({ state: "hidden" });
       const afterClone = await (await fetch(baseUrl + "/api/session?id=first-session")).json();

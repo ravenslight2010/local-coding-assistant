@@ -53,7 +53,7 @@ The command also writes a `.sha256` file. No .NET SDK or build tools are require
 ## Using it with other repositories
 Use **Repo → Browse** to navigate local folders. **Jump to a location** lists available shortcuts such as your current repository, Documents, Downloads, and OneDrive. You can also paste an absolute local path into the **Repo** field and click **Select**. A repository must contain `package.json` or `.git`.
 
-If the repository is still on GitHub, choose **Repo → Browse → Clone from GitHub**, paste its HTTPS repository URL, and click **Clone and open**. This makes a shallow clone under Code Agent's `repositories` folder and selects it for the current session. Public repositories need only Git and internet access; private repositories also require Code Agent's existing GitHub token configuration with read access.
+If the repository is still on GitHub, choose **Repo → Browse → Clone from GitHub**, paste its HTTPS repository URL, and click **Clone and open**. Leave **Save inside folder** blank to use Code Agent's `repositories` folder, or enter an absolute destination path. Code Agent creates the missing destination and repository folders. If the named folder already contains a checkout of the same GitHub repository, Code Agent opens it without modifying it; a different existing folder is left untouched. New clones are shallow. Public repositories need only Git and internet access; private repositories also require Code Agent's existing GitHub token configuration with read access.
 
 The selected path is saved with the session and restored when it is reopened. Set `RUNCALC_REPO` when launching the server to choose the default for new sessions.
 

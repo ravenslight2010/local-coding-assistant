@@ -59,6 +59,9 @@
     #repoPlaces { width:100%; min-height:2.75rem; }
     #repoBrowser label,#repoBrowserStatus { font-size:0.85rem; color:var(--muted); }
     #repoBrowser form { padding:0; margin:0.25rem 0 0.5rem; border:0; align-items:stretch; }
+    #githubRepoForm { flex-direction:column; }
+    #githubRepoForm .repo-picker { flex-wrap:wrap; }
+    #githubRepoForm .repo-picker input { min-width:12rem; }
     #repoBrowser button { min-height:2.75rem; }
     #repoBrowser button:disabled { cursor:default; opacity:0.5; }
     #repoFolders { list-style:none; margin:0.5rem 0; padding:0; max-height:16rem; overflow:auto; }
@@ -216,9 +219,15 @@
     <h2 id="repoBrowserTitle">Choose a repository folder</h2>
     <details>
       <summary>Clone from GitHub</summary>
-      <label for="githubRepoUrl">GitHub repository URL</label>
       <form id="githubRepoForm" class="repo-picker">
+        <label for="githubRepoUrl">GitHub repository URL</label>
         <input id="githubRepoUrl" type="url" maxlength="300" placeholder="https://github.com/owner/repo" required>
+        <label for="githubRepoParent">Save inside folder (optional)</label>
+        <div class="repo-picker">
+          <input id="githubRepoParent" type="text" maxlength="4096" placeholder="Code Agent repositories" aria-describedby="githubRepoHelp" spellcheck="false">
+          <button id="githubUseBrowsed" type="button" disabled>Use browsed location</button>
+        </div>
+        <small id="githubRepoHelp">Code Agent creates a folder named after the repository. The destination does not need to exist yet.</small>
         <button id="githubRepoClone" type="submit">Clone and open</button>
       </form>
       <p id="githubRepoStatus" role="status"></p>
@@ -904,6 +913,8 @@ document.getElementById("searchBadge").onclick = () => {
     const browseSelect = document.getElementById("browseSelect");
     const cloneButton = document.getElementById("githubRepoClone");
     const cloneStatus = document.getElementById("githubRepoStatus");
+    const cloneParent = document.getElementById("githubRepoParent");
+    const useBrowsed = document.getElementById("githubUseBrowsed");
     let browseLocation;
     let browseRequest;
     let cloningRepository = false;
@@ -915,6 +926,7 @@ document.getElementById("searchBadge").onclick = () => {
       browseRequest = request;
       browseSelect.disabled = true;
       browseParent.disabled = true;
+      useBrowsed.disabled = true;
       browseStatus.textContent = "Loading folders…";
       try {
         const response = await fetch("/api/browse", {
@@ -934,6 +946,7 @@ document.getElementById("searchBadge").onclick = () => {
         if (browsePath.value === previousInput) browsePath.value = result.path;
         browseParent.disabled = !result.parent;
         browseSelect.disabled = !result.isRepository;
+        useBrowsed.disabled = false;
         browseStatus.textContent = (result.isRepository
           ? "Repository found. Choose Use this folder to select it."
           : "Open a folder containing .git or package.json.") + (result.truncated ? " Showing the first 250 folders; enter a path to open another." : "");
@@ -952,6 +965,7 @@ document.getElementById("searchBadge").onclick = () => {
           browseStatus.textContent = `Couldn’t open the folder: ${error.message}`;
           browseSelect.disabled = !browseLocation?.isRepository;
           browseParent.disabled = !browseLocation?.parent;
+          useBrowsed.disabled = !browseLocation;
           if (browseLocation && browsePath.value === previousInput) browsePath.value = browseLocation.path;
         }
       }
@@ -962,6 +976,7 @@ document.getElementById("searchBadge").onclick = () => {
       browseFolders.replaceChildren();
       browsePlaces.replaceChildren(new Option("Choose a location", ""));
       cloneStatus.textContent = "";
+      cloneParent.value = "";
       browsePath.value = "";
       repoBrowser.showModal();
       browseTo(null);
@@ -998,6 +1013,8 @@ document.getElementById("searchBadge").onclick = () => {
       }
     };
 
+    useBrowsed.onclick = () => { cloneParent.value = browseLocation.path; };
+
     document.getElementById("githubRepoForm").onsubmit = async (event) => {
       event.preventDefault();
       if (cloningRepository) return;
@@ -1007,10 +1024,11 @@ document.getElementById("searchBadge").onclick = () => {
       cloneButton.disabled = true;
       cloneStatus.textContent = "Cloning from GitHub…";
       try {
+        const parent = cloneParent.value.trim();
         const response = await fetch("/api/repo/clone", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: document.getElementById("githubRepoUrl").value.trim() }),
+          body: JSON.stringify({ url: document.getElementById("githubRepoUrl").value.trim(), ...(parent ? { parent } : {}) }),
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
