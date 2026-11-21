@@ -55,6 +55,8 @@
     #repoBrowser { width:min(32rem,calc(100% - 1.5rem)); max-height:calc(100dvh - 1.5rem); overflow:auto; padding:1rem; border:1px solid var(--border); border-radius:12px; background:var(--panel); color:var(--text); }
     #repoBrowser::backdrop { background:#0009; }
     #repoBrowser h2 { margin:0 0 0.75rem; font-size:1.1rem; }
+    #repoBrowser summary { cursor:pointer; min-height:2.75rem; align-content:center; }
+    #repoPlaces { width:100%; min-height:2.75rem; }
     #repoBrowser label,#repoBrowserStatus { font-size:0.85rem; color:var(--muted); }
     #repoBrowser form { padding:0; margin:0.25rem 0 0.5rem; border:0; align-items:stretch; }
     #repoBrowser button { min-height:2.75rem; }
@@ -212,6 +214,16 @@
   </main>
   <dialog id="repoBrowser" aria-labelledby="repoBrowserTitle">
     <h2 id="repoBrowserTitle">Choose a repository folder</h2>
+    <details>
+      <summary>Clone from GitHub</summary>
+      <label for="githubRepoUrl">GitHub repository URL</label>
+      <form id="githubRepoForm" class="repo-picker">
+        <input id="githubRepoUrl" type="url" maxlength="300" placeholder="https://github.com/owner/repo" required>
+        <button id="githubRepoClone" type="submit">Clone and open</button>
+      </form>
+      <p id="githubRepoStatus" role="status"></p>
+    </details>
+    <hr>
     <label for="browsePath">Folder path</label>
     <form id="browsePathForm" class="repo-picker">
       <input id="browsePath" type="text" maxlength="4096" spellcheck="false" autofocus>
@@ -221,6 +233,8 @@
       <button id="browseHome" type="button">Home</button>
       <button id="browseParent" type="button" disabled>Up one folder</button>
     </div>
+    <p><label for="repoPlaces">Jump to a location</label></p>
+    <select id="repoPlaces"><option value="">Choose a location</option></select>
     <p id="repoBrowserStatus" role="status"></p>
     <ul id="repoFolders" aria-label="Folders"></ul>
     <div class="repo-browser-actions repo-browser-footer">
@@ -885,53 +899,69 @@ document.getElementById("searchBadge").onclick = () => {
     const browsePath = document.getElementById("browsePath");
     const browseStatus = document.getElementById("repoBrowserStatus");
     const browseFolders = document.getElementById("repoFolders");
+    const browsePlaces = document.getElementById("repoPlaces");
     const browseParent = document.getElementById("browseParent");
     const browseSelect = document.getElementById("browseSelect");
+    const cloneButton = document.getElementById("githubRepoClone");
+    const cloneStatus = document.getElementById("githubRepoStatus");
     let browseLocation;
     let browseRequest;
+    let cloningRepository = false;
 
     async function browseTo(folder) {
       browseRequest?.abort();
       const request = new AbortController();
       const previousInput = browsePath.value;
       browseRequest = request;
-      browseLocation = null;
       browseSelect.disabled = true;
       browseParent.disabled = true;
-      browseFolders.replaceChildren();
       browseStatus.textContent = "Loading folders…";
       try {
         const response = await fetch("/api/browse", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: folder }),
+          body: JSON.stringify({ path: folder, sessionId }),
           signal: request.signal,
         });
         const result = await response.json();
         if (request.signal.aborted) return;
         if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
         browseLocation = result;
+        if (result.places) {
+          browsePlaces.replaceChildren(new Option("Choose a location", ""));
+          for (const place of result.places) browsePlaces.add(new Option(place.label, place.path));
+        }
         if (browsePath.value === previousInput) browsePath.value = result.path;
         browseParent.disabled = !result.parent;
         browseSelect.disabled = !result.isRepository;
         browseStatus.textContent = (result.isRepository
           ? "Repository found. Choose Use this folder to select it."
           : "Open a folder containing .git or package.json.") + (result.truncated ? " Showing the first 250 folders; enter a path to open another." : "");
+        browseFolders.replaceChildren();
         for (const folder of result.folders) {
           const item = document.createElement("li");
           const button = document.createElement("button");
           button.type = "button";
           button.textContent = folder.name;
-          button.onclick = () => browseTo(folder.path);
+          button.onclick = () => { browsePath.focus(); browseTo(folder.path); };
           item.append(button);
           browseFolders.append(item);
         }
       } catch (error) {
-        if (!request.signal.aborted) browseStatus.textContent = `Couldn’t open the folder: ${error.message}`;
+        if (!request.signal.aborted) {
+          browseStatus.textContent = `Couldn’t open the folder: ${error.message}`;
+          browseSelect.disabled = !browseLocation?.isRepository;
+          browseParent.disabled = !browseLocation?.parent;
+          if (browseLocation && browsePath.value === previousInput) browsePath.value = browseLocation.path;
+        }
       }
     }
 
     document.getElementById("browseRepo").onclick = () => {
+      browseLocation = null;
+      browseFolders.replaceChildren();
+      browsePlaces.replaceChildren(new Option("Choose a location", ""));
+      cloneStatus.textContent = "";
       browsePath.value = "";
       repoBrowser.showModal();
       browseTo(null);
@@ -941,12 +971,19 @@ document.getElementById("searchBadge").onclick = () => {
       if (browsePath.value.trim()) browseTo(browsePath.value.trim());
     };
     document.getElementById("browseHome").onclick = () => browseTo(null);
+    browsePlaces.onchange = () => {
+      if (browsePlaces.value) browseTo(browsePlaces.value);
+      browsePlaces.value = "";
+    };
     browseParent.onclick = () => browseTo(browseLocation.parent);
     document.getElementById("browseCancel").onclick = () => {
       browseRequest?.abort();
       repoBrowser.close();
     };
-    repoBrowser.addEventListener("cancel", () => browseRequest?.abort());
+    repoBrowser.addEventListener("cancel", (event) => {
+      if (cloningRepository) event.preventDefault();
+      else browseRequest?.abort();
+    });
     browseSelect.onclick = async () => {
       const location = browseLocation;
       browseSelect.disabled = true;
@@ -958,6 +995,33 @@ document.getElementById("searchBadge").onclick = () => {
           browseSelect.disabled = false;
           browseStatus.textContent = "Repository selection failed: " + error.message;
         }
+      }
+    };
+
+    document.getElementById("githubRepoForm").onsubmit = async (event) => {
+      event.preventDefault();
+      if (cloningRepository) return;
+      cloningRepository = true;
+      const localControls = repoBrowser.querySelectorAll("#browsePathForm, .repo-browser-actions, #repoPlaces, #repoFolders");
+      localControls.forEach((control) => { control.inert = true; });
+      cloneButton.disabled = true;
+      cloneStatus.textContent = "Cloning from GitHub…";
+      try {
+        const response = await fetch("/api/repo/clone", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: document.getElementById("githubRepoUrl").value.trim() }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        await selectRepository(result.root);
+        repoBrowser.close();
+      } catch (error) {
+        cloneStatus.textContent = error.message;
+      } finally {
+        cloningRepository = false;
+        cloneButton.disabled = false;
+        localControls.forEach((control) => { control.inert = false; });
       }
     };
 
