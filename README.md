@@ -25,6 +25,9 @@ Launch **Code Agent** from the Desktop or Start Menu. It opens in a dedicated Mi
 
 Use `Get-CodeAgent.cmd /startup` to add the assistant to Windows Startup. Re-running setup preserves project memory and uses versioned source folders rather than replacing an existing source installation.
 
+## Install an app from a selected repository
+Select the repository, click **Install app**, and review the detected commands before confirming. Only install projects you trust; setup and dependency scripts run with your permissions. The button supports recognized PowerShell installers, Docker, Node projects with a `start` or `dev` script, Python projects that launch with `python -m app`, and static sites. It reports when it launches a long-running app without waiting for it to close. Check the app’s URL or port to confirm readiness. To install Code Agent itself on Windows, use `CA-Setup.cmd` instead.
+
 ## Manual or offline-source install
 Extract the full source bundle into a short path and run:
 

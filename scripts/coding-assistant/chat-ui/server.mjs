@@ -14,6 +14,7 @@ import { trimMessages } from "./lib/trim.mjs";
 import { listWorkflows, getWorkflow } from "./lib/workflows.mjs";
 import { discoverTests, planFor } from "./lib/testing.mjs";
 import { gitEnvironment } from "./lib/git-auth.mjs";
+import { createInstaller, detectInstall } from "./lib/install-app.mjs";
 import { execFileSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -629,6 +630,14 @@ function rootForSession(sessionId) {
   }
 }
 
+const runInstall = createInstaller();
+
+function installerPlan(root) {
+  return detectInstall((relative) => {
+    const absolute = safeResolve(root, relative);
+    return absolute && statSync(absolute).isFile() ? absolute : null;
+  });
+}
 
 function taskFile(id) { return isSafeRecordId(id) ? path.join(TASKS_DIR, id + ".json") : null; }
 function listTasks() {
@@ -1359,85 +1368,29 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
     }
 
     if (tool.tool === "install_app") {
-      const candidates = [
-        "scripts/self-host/Install-RunCalcHost.ps1",
-        "scripts/install-host.ps1",
-        "install.ps1",
-        "scripts/ca/setup.ps1",
-      ];
-      let script = null;
-      for (const c of candidates) {
-        const abs = path.join(root, c);
-        if (existsSync(abs)) { script = abs; break; }
-      }
-      if (!script) return send(res, 400, { error: "no installer found in this repo", looked: candidates });
-      const { spawn } = await import("node:child_process");
-      const isWin = process.platform === "win32";
-      const child = spawn(isWin ? "powershell.exe" : "pwsh",
-        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-NonInteractive"],
-        { cwd: root, windowsHide: true });
-      let out = "";
-      const append = (c) => { const t = c.toString(); if (out.length < 8000) out += t.slice(0, 8000 - out.length); };
-      child.stdout.on("data", append);
-      child.stderr.on("data", append);
-      const code = await new Promise((resolve) => { child.once("close", resolve); child.once("error", () => resolve(null)); });
-      return send(res, 200, { ok: code === 0, code, script: path.relative(root, script), output: out.slice(0, 4000) });
+      const plan = installerPlan(root);
+      if (plan.error) return send(res, 400, { error: plan.error });
+      const result = await runInstall(root, plan);
+      return send(res, result.ok ? 200 : 400, { ...result, plan });
     }
     return send(res, 400, { error: "unknown tool" });
   }
 
-  
-  
-  
-  if (req.method === "POST" && url.pathname === "/api/install") {
+  if (req.method === "POST" && ["/api/install/plan", "/api/install"].includes(url.pathname)) {
     const body = JSON.parse(await readBody(req) || "{}");
+    if (body.sessionId != null && (!isSafeRecordId(body.sessionId) || !loadSession(body.sessionId))) {
+      return send(res, 400, { error: "The selected session is unavailable. Reopen it before installing." });
+    }
     const root = rootForSession(body.sessionId);
-    const has = (f) => existsSync(path.join(root, f));
-    let plan = null;
-    // 1. Known installers first
-    for (const c of ["scripts/self-host/Install-RunCalcHost.ps1", "scripts/install-host.ps1", "install.ps1"]) {
-      if (has(c)) { plan = { kind: "script", script: c, args: ["-NonInteractive"] }; break; }
+    const plan = installerPlan(root);
+    if (plan.error) return send(res, 400, { error: plan.error });
+    const planId = sha256(JSON.stringify({ root, plan }));
+    if (url.pathname === "/api/install/plan") return send(res, 200, { root, plan, planId });
+    if (body.planId !== planId) {
+      return send(res, 409, { error: "Repository or install plan changed. Review the install plan again." });
     }
-    // 2. Docker
-    if (!plan && (has("docker-compose.yml") || has("compose.yml"))) plan = { kind: "docker", cmd: "docker compose up -d --build" };
-    if (!plan && has("Dockerfile")) plan = { kind: "docker", cmd: "docker build -t app . && docker run -d -p 3000:3000 app" };
-    // 3. Node
-    if (!plan && has("package.json")) {
-      let start = "npm start";
-      try {
-        const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
-        const pm = has("pnpm-lock.yaml") ? "pnpm" : has("yarn.lock") ? "yarn" : "npm";
-        start = pkg.scripts?.start ? `${pm} start` : `${pm} run dev`;
-        plan = { kind: "node", cmd: `${pm} install && ${start}` };
-      } catch { plan = { kind: "node", cmd: "npm install && npm start" }; }
-    }
-    // 4. Python
-    if (!plan && (has("requirements.txt") || has("pyproject.toml"))) {
-      const req = has("requirements.txt") ? "pip install -r requirements.txt" : "pip install -e .";
-      plan = { kind: "python", cmd: `${req} && python -m app` };
-    }
-    // 5. Static
-    if (!plan && has("index.html")) plan = { kind: "static", cmd: "npx --yes serve -l 3000" };
-    if (!plan) return send(res, 400, { error: "could not detect how to install this repo" });
-
-    const { spawn } = await import("node:child_process");
-    const isWin = process.platform === "win32";
-    let child;
-    if (plan.kind === "script") {
-      child = spawn(isWin ? "powershell.exe" : "pwsh",
-        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(root, plan.script), ...(plan.args || [])],
-        { cwd: root, windowsHide: true });
-    } else {
-      child = spawn(isWin ? "cmd.exe" : "bash",
-        isWin ? ["/d", "/s", "/c", plan.cmd] : ["-lc", plan.cmd],
-        { cwd: root, windowsHide: true });
-    }
-    let out = "";
-    const append = (c) => { const t = c.toString(); if (out.length < 8000) out += t.slice(0, 8000 - out.length); };
-    child.stdout.on("data", append);
-    child.stderr.on("data", append);
-    const code = await new Promise((resolve) => { child.once("close", resolve); child.once("error", () => resolve(null)); });
-    return send(res, 200, { ok: code === 0, code, plan, output: out.slice(0, 4000) });
+    const result = await runInstall(root, plan);
+    return send(res, result.ok ? 200 : 400, { ...result, plan });
   }
 
 if (req.method === "GET" && url.pathname === "/api/selftest") {

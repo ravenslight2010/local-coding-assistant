@@ -278,6 +278,7 @@
         case "git_push": return `Push ${String(tool.branch || "")} to ${String(tool.remote || "")}`;
         case "git_clone": return `Clone ${String(tool.url || "")} into ${String(tool.dest || "")}`;
         case "git_pr": return `Create PR: ${String(tool.title || "")} → ${String(tool.base || "main")}`;
+        case "install_app": return "Run the selected repository’s installer. Only allow this for a repository you trust.";
         default: return String(tool.path || tool.command || "");
       }
     }
@@ -1130,22 +1131,45 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
     setInterval(loadTasks, 15000);
   
     document.getElementById("selfBtn").addEventListener("click", async () => {
-      const r = await fetch("/api/selftest?sessionId=" + encodeURIComponent(currentSession || ""));
+      const r = await fetch("/api/selftest?sessionId=" + encodeURIComponent(sessionId || ""));
       const j = await r.json();
       const lines = Object.entries(j).map(([k,v]) => k + ": " + v).join("\n");
       alert("Self-test\n" + lines);
     });
 
 
-    document.getElementById("installBtn")?.addEventListener("click", async () => {
-      if (!confirm("Install the currently selected app? This runs its installer if one exists.")) return;
-      const r = await fetch("/api/install", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: currentSession || "" })
-      });
-      const j = await r.json();
-      alert(j.ok ? ("Installed (" + (j.plan?.kind || "script") + ")") : ("Install failed: " + (j.error || j.output || "unknown")));
+    const installButton = document.getElementById("installBtn");
+    installButton.addEventListener("click", async () => {
+      const selectedSession = sessionId;
+      installButton.disabled = true;
+      let status;
+      const post = async (route, body) => {
+        const response = await fetch(route, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error([result.error, result.output].filter(Boolean).join("\n") || `Request failed (${response.status}).`);
+        return result;
+      };
+      try {
+        const { root, plan, planId } = await post("/api/install/plan", { sessionId: selectedSession });
+        const steps = [plan.script, plan.setup, plan.launch].filter(Boolean).join("\n");
+        if (!confirm(`Install the app from ${root}?\n\n${steps}\n\nThese steps can run repository code. Continue only if you trust this repository.`)) return;
+        status = addMsg("system", "Installing app…");
+        status.setAttribute("role", "status");
+        const result = await post("/api/install", { sessionId: selectedSession, planId });
+        status.textContent = result.status === "launched"
+          ? "Installation complete. App launch requested; check the app’s URL or port to confirm it’s ready."
+          : "Installation complete.";
+      } catch (error) {
+        const message = "Install failed: " + error.message;
+        if (status) status.textContent = message;
+        else addMsg("system", message).setAttribute("role", "status");
+      } finally {
+        installButton.disabled = false;
+      }
     });
 
 </script>
