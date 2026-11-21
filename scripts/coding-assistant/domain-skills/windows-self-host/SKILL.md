@@ -23,7 +23,7 @@ Keep the web clients as they are. Only the server becomes a Windows process.
 
 
 ## Install current app
-The coder has a universal installer. When the user clicks Install app or says "install the app":
+When the user wants to install an app from a local repository:
 1. Confirm a repository is selected.
 2. Detect how to install it, in order:
    - Known script (scripts/self-host/Install-RunCalcHost.ps1, scripts/install-host.ps1, install.ps1)
@@ -31,5 +31,6 @@ The coder has a universal installer. When the user clicks Install app or says "i
    - Node (package.json; uses pnpm/yarn/npm based on lockfile; runs start or dev)
    - Python (requirements.txt or pyproject.toml)
    - Static (index.html; serves on port 3000)
-3. Run the detected plan and report the kind, command, and exit code.
-4. If nothing matches, say the repo type is not recognized.
+3. Ask the user to review the repository and commands shown by **Install app** before confirming. Only install repositories they trust.
+4. Distinguish completed setup from a launched app; verify the app at its configured address before claiming it is ready.
+5. Use `CA-Setup.cmd` for Code Agent itself on Windows. If nothing matches, say the repo type is not recognized.
