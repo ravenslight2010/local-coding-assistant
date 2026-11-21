@@ -157,6 +157,27 @@ test("creates and patches new files under the selected repository", async () => 
   const patchApply = await post("/api/tool/apply", JSON.stringify({ approvalId: patchApprovalId }));
   assert.equal(patchApply.status, 200);
   assert.equal(readFileSync(path.join(fixtureRepo, "nested", "new-file.txt"), "utf8"), "patched content");
+
+  const overwrite = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "patch", files: [{ path: "nested/new-file.txt", content: "replacement" }] },
+  }));
+  assert.equal(overwrite.status, 200);
+  const { approvalId: overwriteId } = await overwrite.json();
+  const rejectedOverwrite = await post("/api/tool/apply", JSON.stringify({ approvalId: overwriteId }));
+  assert.equal((await rejectedOverwrite.json()).ok, false);
+  assert.equal(readFileSync(path.join(fixtureRepo, "nested", "new-file.txt"), "utf8"), "patched content");
+});
+
+test("file creation rejects protected and out-of-repository directory aliases", async () => {
+  mkdirSync(path.join(fixtureRepo, ".git"), { recursive: true });
+  symlinkSync(path.join(fixtureRepo, ".git"), path.join(fixtureRepo, "metadata"), "junction");
+  symlinkSync(tempRoot, path.join(fixtureRepo, "outside-dir"), "junction");
+  for (const path of ["metadata/nested/new.txt", "outside-dir/nested/new.txt"]) {
+    const response = await post("/api/tool/prepare", JSON.stringify({
+      tool: { tool: "create", path, content: "not written" },
+    }));
+    assert.equal(response.status, 400, path);
+  }
 });
 
 test("prepares the advertised Git tools for explicit approval", async () => {

@@ -221,7 +221,7 @@ function safeResolve(root, rel) {
     const realRoot = realpathSync(root);
     const realAbs = realpathSync(abs);
     const realRelative = path.relative(realRoot, realAbs);
-    if (realRelative === ".." || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative)) return null;
+    if (realRelative === ".." || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative) || realRelative.split(path.sep).some((segment) => segment.toLowerCase() === ".git")) return null;
     return realAbs;
   } catch {
     return null;
@@ -254,7 +254,10 @@ function safeResolveForCreate(root, rel) {
     const resolvedParent = path.resolve(realParent, missingPath);
     const resolvedRelative = path.relative(realRoot, resolvedParent);
     if (resolvedRelative === ".." || resolvedRelative.startsWith(`..${path.sep}`) || path.isAbsolute(resolvedRelative)) return null;
-    return path.join(resolvedParent, path.basename(abs));
+    const target = path.join(resolvedParent, path.basename(abs));
+    const targetRelative = path.relative(realRoot, target);
+    if (isProtectedRepositoryPath(targetRelative) || targetRelative.split(path.sep).some((segment) => segment.toLowerCase() === ".git")) return null;
+    return target;
   } catch {
     return null;
   }
@@ -1240,9 +1243,10 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       for (const f of tool.files) {
         const isNewFile = typeof f.content === "string" && !f.old;
         const abs = isNewFile ? safeResolveForCreate(root, f.path) : safeResolve(root, f.path);
-        if (!abs || isProtectedRepositoryPath(f.path)) { failed.push({ path: f.path, error: "invalid" }); continue; }
+        if (!abs || isProtectedRepositoryPath(f.path) || isProtectedRepositoryPath(path.relative(root, abs))) { failed.push({ path: f.path, error: "invalid" }); continue; }
         try {
           if (typeof f.content === "string" && !f.old) {
+            if (existsSync(abs)) { failed.push({ path: f.path, error: "file exists" }); continue; }
             if (!existsSync(path.dirname(abs))) mkdirSync(path.dirname(abs), { recursive: true });
             atomicWriteFile(abs, f.content, 0o644);
             applied.push(f.path);
@@ -1310,7 +1314,7 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
       const exec = promisify(execFile);
-      const safeName = (s) => /^[A-Za-z0-9._/-]+$/.test(s) && !s.includes("..");
+      const safeName = (s) => /^[A-Za-z0-9._/-]+$/.test(s) && !s.startsWith("-") && !s.includes("..");
       try {
         if (tool.tool === "git_status") {
           const r = await exec("git", ["status", "--short", "--branch"], { cwd: root, timeout: 15000 });
@@ -1343,7 +1347,7 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
         }
         if (tool.tool === "git_clone") {
           if (!/^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(\.git)?$/.test(tool.url)) return send(res, 400, { error: "only https github urls" });
-          if (!safeName(tool.dest)) return send(res, 400, { error: "invalid dest" });
+          if (!safeName(tool.dest) || tool.dest.startsWith("/") || tool.dest.split("/").some((part) => !part || part === "." || part.toLowerCase() === ".git")) return send(res, 400, { error: "invalid dest" });
           const dest = path.resolve(root, "..", tool.dest);
           const r = await exec("git", ["clone", tool.url, dest], { timeout: 120000 });
           return send(res, 200, { ok: true, dest, output: String(r.stdout || r.stderr || "").slice(0, 4000) });
