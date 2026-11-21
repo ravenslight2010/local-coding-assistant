@@ -8,6 +8,7 @@ param(
   [switch]$AddStartup,
   [switch]$SkipSkillsInstall,
   [switch]$SkipModelPull,
+  [switch]$InstallTestBrowsers,
   [ValidateSet("speed", "balanced")]
   [string]$ModelPolicy = "speed",
   [string]$Model = ""
@@ -223,7 +224,7 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     '$env:CA_ALLOW_SHELL = ''1'''
     '# Auto-update: if a newer pin is published, re-run Get-CodeAgent.cmd once'
     '$pinFile = Join-Path $PSScriptRoot ''source\pin.txt'''
-    '$remote = ''''https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/Get-CodeAgent.cmd'''''
+    '$remote = ''https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/Get-CodeAgent.cmd'''
     'try {'
     '  $tmp = Join-Path $env:TEMP ''ca-remote.cmd'''
     '  Invoke-WebRequest $remote -OutFile $tmp -UseBasicParsing -TimeoutSec 8'
@@ -288,24 +289,26 @@ function Verify-Installation([string]$Model) {
 
 function Ensure-TestingStack {
   Step "Free testing stack"
-  $ui = Join-Path $AgentRoot "app\ui"
-  if (-not (Test-Path $ui)) { Info "UI not installed yet; skipping browser install"; return }
-  Push-Location $ui
+  $cli = Join-Path $AgentRoot "app/ui/node_modules/playwright-core/cli.js"
   try {
-    if (HasCmd "npx") {
-      Info "Installing Playwright browsers (chromium, firefox, webkit)"
-      $proc = Start-Process -FilePath "npx" -ArgumentList @("playwright", "install", "chromium", "firefox", "webkit") -NoNewWindow -Wait -PassThru
-      if ($proc.ExitCode -ne 0) { Info "Playwright browser install exited $($proc.ExitCode); tests may need a later run" }
+    if (Test-Path -LiteralPath $cli -PathType Leaf) {
+      Info "Installing optional Playwright browsers (chromium, firefox, webkit)"
+      & node $cli install chromium firefox webkit
+      if ($LASTEXITCODE -ne 0) { Info "Playwright browser install exited $LASTEXITCODE; Code Agent can still use installed Edge." }
       else { Info "Playwright browsers ready" }
     } else {
-      Info "npx missing; skip Playwright browsers"
+      Info "Playwright CLI missing; skipping optional browser downloads."
     }
-  } finally { Pop-Location }
+  } catch {
+    Info "Optional Playwright browser downloads failed: $($_.Exception.Message)"
+  }
 
   if (HasCmd "adb") { Info "Android platform-tools present" }
   else { Info "Android AVD not installed. Install Android Studio and create one AVD for real Android tests." }
 
-  $hyperv = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -ErrorAction SilentlyContinue
+  $hyperv = if (HasCmd "Get-WindowsOptionalFeature") {
+    Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -ErrorAction SilentlyContinue
+  }
   if ($hyperv -and $hyperv.State -eq "Enabled") { Info "Hyper-V available for Windows guests" }
   elseif (HasCmd "VBoxManage") { Info "VirtualBox available for OS guests" }
   else { Info "No free VM tool detected. Install VirtualBox or enable Hyper-V if you need OS guests." }
@@ -323,7 +326,7 @@ try {
   $model = Select-Model
   Ensure-Model $model
   Copy-App $repo $model
-  Ensure-TestingStack
+  if ($InstallTestBrowsers) { Ensure-TestingStack }
   Create-Shortcuts
   Verify-Installation $model
   if ($LaunchChat -and -not $NoLaunch) {

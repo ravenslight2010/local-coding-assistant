@@ -9,6 +9,7 @@ trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/scripts/ca" "$STAGE/scripts/coding-assistant" "$STAGE/docs/coding-assistant"
 cp "$ROOT/CA-Setup.cmd" "$STAGE/CA-Setup.cmd"
 cp "$ROOT/scripts/ca/setup.ps1" "$STAGE/scripts/ca/setup.ps1"
+cp "$ROOT/scripts/ca/Choose-Model.ps1" "$STAGE/scripts/ca/Choose-Model.ps1"
 cp "$ROOT/scripts/ca/Select-CodingModel.ps1" "$STAGE/scripts/ca/Select-CodingModel.ps1"
 cp "$ROOT/scripts/ca/WINDOWS-LONG-PATHS.txt" "$STAGE/README.txt"
 cp -R "$ROOT/scripts/coding-assistant/chat-ui" "$STAGE/scripts/coding-assistant/chat-ui"

@@ -3,10 +3,10 @@
 ## Current pin
 `Get-CodeAgent.cmd` installs immutable source:
 
-- Commit: `d1682b79fff7b5423069b2d2c1b488d1b4e8be05`
-- Archive SHA-256: `1deb2f10202ac1d1494324c3c283c35b29323ca23e828f3d9c19d75b6690028f`
+- Commit: `df42095169225b0601f6060ff0b895610acdcc77`
+- Archive SHA-256: `30f8fee12ef2a2b7adb27bde305a9dbb92d5d97394ddbedbce0b8fbb7f096eda`
 
-This pin includes the **Install app** confirmation and background launch fixes, as well as the local Canvas/browser check and approval-gated coding tools.
+This pin includes the Windows launcher and optional browser download fixes, along with the **Install app** confirmation and background launch changes.
 
 ## How to run
 Double-click `Get-CodeAgent.cmd`. It requests Administrator, verifies the zip, then runs setup.
@@ -15,6 +15,15 @@ Double-click `Get-CodeAgent.cmd`. It requests Administrator, verifies the zip, t
 ```bat
 Get-CodeAgent.cmd /startup
 Get-CodeAgent.cmd /model qwen2.5-coder:7b
+Get-CodeAgent.cmd /testbrowsers
+```
+
+Setup uses installed Microsoft Edge for Canvas checks. Run `Get-CodeAgent.cmd /testbrowsers` to download Playwright’s Chromium, Firefox, and WebKit during setup. Failed optional browser downloads do not stop Code Agent setup.
+
+If the application payload is already installed, add the browsers without rerunning setup. Run this in Command Prompt under the Windows account that will run the tests:
+
+```bat
+node "C:\runcalc\agent\app\ui\node_modules\playwright-core\cli.js" install chromium firefox webkit
 ```
 
 ## Updating later
