@@ -66,7 +66,7 @@ before(async () => {
   const port = await freePort();
   baseUrl = `http://127.0.0.1:${port}`;
   const env = { ...process.env, RUNCALC_REPO: fixtureRepo, CA_AGENT_ROOT: agentRoot };
-  delete env.CA_ALLOW_SEARCH;
+  env.CA_ALLOW_SEARCH = "0";
   delete env.CA_ALLOW_SHELL;
   serverProcess = spawn(process.execPath, [serverScript, "--port", String(port)], {
     cwd: repo,
@@ -112,6 +112,19 @@ test("rejects cross-origin tool preparation", async () => {
 test("requires JSON for same-origin API writes", async () => {
   const response = await post("/api/tool/prepare", "{}", { "Content-Type": "text/plain" });
   assert.equal(response.status, 415);
+});
+
+test("web test accepts only explicit local HTTP preview URLs", async () => {
+  const urls = [
+    "https://127.0.0.1:3000/",
+    "http://example.com:3000/",
+    `http://127.0.0.1:${new URL(baseUrl).port}/`,
+    "http://user:password@127.0.0.1:3000/",
+  ];
+  for (const url of urls) {
+    const response = await post("/api/web-test", JSON.stringify({ url }));
+    assert.equal(response.status, 400, url);
+  }
 });
 
 test("rejects traversal IDs for sessions and tasks", async () => {

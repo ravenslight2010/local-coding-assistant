@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Code Agent</title>
   <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="data:," />
   <meta name="theme-color" content="#0b0f14" />
   <style>
     :root { --bg:#0b0f14; --panel:#141a22; --panel-2:#1c2430; --border:#2a3544; --text:#e8edf5; --muted:#8b9bb4; --accent:#4c9aff; --ok:#3dd68c; --warn:#e6a23c; --user:#1a2740; --assistant:#161d28; }
@@ -51,6 +52,33 @@
     .repo-picker { display:flex; gap:0.3rem; margin-bottom:0.45rem; }
     .repo-picker input { min-width:0; flex:1; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); padding:0.35rem; font:inherit; font-size:0.72rem; }
     .repo-picker button { padding:0.3rem 0.45rem; font-size:0.72rem; }
+    main.canvas-open { grid-template-columns:250px minmax(0,1.15fr) minmax(320px,0.85fr); }
+    .canvas-panel { display:none; min-width:0; min-height:0; flex-direction:column; border-left:1px solid var(--border); background:var(--panel); }
+    main.canvas-open .canvas-panel:not([hidden]) { display:flex; }
+    .canvas-header { display:flex; align-items:center; justify-content:space-between; gap:0.5rem; padding:0.65rem 0.8rem; border-bottom:1px solid var(--border); }
+    .canvas-header h2 { margin:0; font-size:0.9rem; }
+    .canvas-controls { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:0.45rem; padding:0.65rem 0.8rem 0.35rem; }
+    .canvas-controls label { display:flex; flex-direction:column; gap:0.25rem; min-width:0; color:var(--muted); font-size:0.72rem; }
+    .canvas-controls input { width:100%; min-width:0; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); padding:0.42rem 0.55rem; font:inherit; }
+    .canvas-controls select { align-self:end; }
+    .canvas-status { min-height:1.5em; margin:0; padding:0 0.8rem 0.45rem; color:var(--muted); font-size:0.75rem; overflow-wrap:anywhere; }
+    .web-test { display:flex; align-items:center; flex-wrap:wrap; gap:0.45rem; padding:0.5rem 0.8rem; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+    .web-test h3 { margin:0 auto 0 0; font-size:0.78rem; }
+    #webTestResult { margin:0; flex-basis:100%; color:var(--muted); font-size:0.75rem; overflow-wrap:anywhere; }
+    #webTestResult[data-state="passed"] { color:var(--ok); }
+    #webTestResult[data-state="failed"] { color:var(--warn); }
+    #webTestDetails { flex-basis:100%; min-width:0; color:var(--muted); font-size:0.75rem; }
+    #webTestScreenshot { display:block; max-width:100%; max-height:40vh; margin-top:0.5rem; border:1px solid var(--border); border-radius:6px; background:#fff; }
+    #webTestErrors { max-height:8rem; overflow:auto; padding-left:1.2rem; overflow-wrap:anywhere; }
+    .preview-stage { flex:1; min-height:0; display:flex; justify-content:center; overflow:auto; padding:0.65rem; background:#0b0f14; }
+    #previewFrame { width:100%; height:100%; min-height:260px; border:1px solid var(--border); border-radius:8px; background:#fff; }
+    #canvasPanel[data-size="tablet"] #previewFrame { max-width:768px; }
+    #canvasPanel[data-size="phone"] #previewFrame { max-width:390px; }
+    @media (max-width:1000px) {
+      main.canvas-open { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(150px,32vh) minmax(0,1fr); }
+      main.canvas-open .chat { display:none; }
+      main.canvas-open .canvas-panel { grid-column:1; grid-row:2; border-left:0; }
+    }
     @media (max-width:720px) {
       main { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(150px,32vh) minmax(0,1fr); }
       aside { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); border-right:0; border-bottom:1px solid var(--border); }
@@ -60,6 +88,12 @@
       form textarea { min-width:0; }
       #log { padding:0.65rem; }
       .ctx-bar { padding:0.3rem 0.6rem; gap:0.4rem; }
+      .canvas-controls { grid-template-columns:minmax(0,1fr) auto; padding:0.5rem; }
+      .canvas-controls label { grid-column:1 / -1; }
+      .canvas-header { padding:0.5rem; }
+      .web-test { padding:0.5rem; }
+      .preview-stage { padding:0.4rem; }
+      #previewFrame { min-height:0; }
     }
   </style>
 </head>
@@ -74,6 +108,7 @@
     <label class="coding-toggle" title="Auto-apply file edits and continue. Shell still asks."><input id="autoMode" type="checkbox" /> Auto</label>
     <label class="coding-toggle" title="Include this repository's imported research context"><input id="contextPack" type="checkbox" /> Pack</label>
     <select id="model" aria-label="Model"></select>
+    <button id="canvasToggle" type="button" aria-controls="canvasPanel" aria-expanded="false">Canvas</button>
     <button id="newSess" title="New session">New</button>
     <button id="diag" title="Export diagnostics">Diag</button>
     <button id="memBtn" title="Project memory">Memory</button>
@@ -127,6 +162,39 @@
         <button type="submit" class="primary" id="send">Send</button>
       </form>
     </section>
+    <section id="canvasPanel" class="canvas-panel" data-size="desktop" aria-labelledby="canvasHeading" hidden>
+      <div class="canvas-header">
+        <h2 id="canvasHeading">Canvas preview</h2>
+        <button id="canvasClose" type="button">Close</button>
+      </div>
+      <div class="canvas-controls">
+        <label for="previewUrl">Local app URL
+          <input id="previewUrl" type="url" maxlength="2048" placeholder="http://127.0.0.1:3000/" autocomplete="url" />
+        </label>
+        <button id="previewLoad" class="primary" type="button">Load</button>
+        <select id="previewSize" aria-label="Preview size">
+          <option value="desktop">Desktop</option>
+          <option value="tablet">Tablet</option>
+          <option value="phone">Phone</option>
+        </select>
+      </div>
+      <p id="previewStatus" class="canvas-status" role="status" aria-live="polite">Preview accepts local HTTP apps only.</p>
+      <div class="web-test">
+        <h3>Mini web test</h3>
+        <button id="webTest" type="button">Check page</button>
+        <button id="previewReload" type="button">Reload</button>
+        <button id="previewNewTab" type="button">Open in new tab</button>
+        <p id="webTestResult" role="status" aria-live="polite" data-state="idle">Runs the page in a temporary browser, captures a screenshot, and checks browser errors.</p>
+        <details id="webTestDetails" hidden>
+          <summary>Screenshot and browser errors</summary>
+          <img id="webTestScreenshot" alt="Screenshot from the local browser check" />
+          <ul id="webTestErrors"></ul>
+        </details>
+      </div>
+      <div class="preview-stage">
+        <iframe id="previewFrame" title="Local app preview" sandbox="allow-forms allow-scripts allow-same-origin" referrerpolicy="no-referrer" loading="lazy"></iframe>
+      </div>
+    </section>
   </main>
   <script type="module">
     import { consumeChatStream } from "/chat-stream.mjs";
@@ -135,6 +203,15 @@
     const tree = document.getElementById("tree");
     const modelSel = document.getElementById("model");
     const sessionsEl = document.getElementById("sessions");
+    const canvasPanel = document.getElementById("canvasPanel");
+    const canvasToggle = document.getElementById("canvasToggle");
+    const previewFrame = document.getElementById("previewFrame");
+    const previewUrlInput = document.getElementById("previewUrl");
+    const previewStatus = document.getElementById("previewStatus");
+    const webTestResult = document.getElementById("webTestResult");
+    const webTestDetails = document.getElementById("webTestDetails");
+    const webTestScreenshot = document.getElementById("webTestScreenshot");
+    const webTestErrors = document.getElementById("webTestErrors");
     let messages = [];
     let sessionId = localStorage.getItem("ca_session") || null;
     let currentTaskId = null;
@@ -844,6 +921,118 @@ document.getElementById("selectRepo").onclick = selectRepository;
         log.appendChild(card);
       } catch (e) { addMsg("system", "Search failed: " + e.message); }
     }
+
+    function getLocalPreviewUrl() {
+      let target;
+      try { target = new URL(previewUrlInput.value.trim()); } catch { return null; }
+      if (
+        target.protocol !== "http:" ||
+        target.hostname !== "127.0.0.1" ||
+        !target.port ||
+        target.username ||
+        target.password ||
+        target.pathname.length > 512
+      ) return null;
+      return target;
+    }
+
+    function loadPreview() {
+      const target = getLocalPreviewUrl();
+      if (!target) {
+        previewStatus.textContent = "Use a local HTTP URL such as http://127.0.0.1:3000/.";
+        return null;
+      }
+      previewStatus.textContent = "Loading local preview…";
+      previewFrame.src = target.href;
+      return target;
+    }
+
+    canvasToggle.addEventListener("click", () => {
+      canvasPanel.hidden = false;
+      document.querySelector("main").classList.add("canvas-open");
+      canvasToggle.setAttribute("aria-expanded", "true");
+      previewUrlInput.focus();
+    });
+    document.getElementById("canvasClose").addEventListener("click", () => {
+      canvasPanel.hidden = true;
+      document.querySelector("main").classList.remove("canvas-open");
+      canvasToggle.setAttribute("aria-expanded", "false");
+      canvasToggle.focus();
+    });
+    document.getElementById("previewLoad").addEventListener("click", loadPreview);
+    previewUrlInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") loadPreview();
+    });
+    document.getElementById("previewSize").addEventListener("change", (event) => {
+      canvasPanel.dataset.size = event.currentTarget.value;
+    });
+    document.getElementById("previewReload").addEventListener("click", () => {
+      if (!getLocalPreviewUrl()) {
+        previewStatus.textContent = "Load a valid local HTTP URL first.";
+        return;
+      }
+      if (!previewFrame.src) loadPreview();
+      else previewFrame.src = previewFrame.src;
+    });
+    document.getElementById("previewNewTab").addEventListener("click", () => {
+      const target = getLocalPreviewUrl();
+      if (!target) {
+        previewStatus.textContent = "Load a valid local HTTP URL first.";
+        return;
+      }
+      window.open(target.href, "_blank", "noopener,noreferrer");
+    });
+    document.getElementById("webTest").addEventListener("click", async (event) => {
+      const target = getLocalPreviewUrl();
+      if (!target) {
+        previewStatus.textContent = "Enter a valid local HTTP URL before running the check.";
+        return;
+      }
+      const button = event.currentTarget;
+      button.disabled = true;
+      webTestResult.dataset.state = "idle";
+      webTestResult.textContent = "Checking local page…";
+      webTestDetails.hidden = true;
+      webTestScreenshot.removeAttribute("src");
+      webTestErrors.replaceChildren();
+      try {
+        const response = await fetch("/api/web-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: target.href }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "web test failed");
+        webTestResult.dataset.state = result.passed ? "passed" : "failed";
+        webTestResult.textContent = `${result.passed ? "Passed" : "Failed"}: HTTP ${result.status ?? "no response"}; ${result.durationMs} ms.${result.title ? ` Title: ${result.title}.` : ""}`;
+        const errors = [
+          ...(result.consoleErrors || []).map((message) => "Console: " + message),
+          ...(result.pageErrors || []).map((message) => "Page: " + message),
+        ];
+        if (result.blockedRequests) errors.push(`Blocked ${result.blockedRequests} non-local or disallowed request(s).`);
+        if (typeof result.screenshot === "string" && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(result.screenshot)) {
+          webTestScreenshot.src = result.screenshot;
+        } else {
+          errors.push("Screenshot was too large to include.");
+        }
+        if (!errors.length) errors.push("No browser console or page errors.");
+        for (const message of errors) {
+          const item = document.createElement("li");
+          item.textContent = String(message);
+          webTestErrors.appendChild(item);
+        }
+        webTestDetails.hidden = false;
+        webTestDetails.open = true;
+      } catch (error) {
+        webTestResult.dataset.state = "failed";
+        webTestResult.textContent = "Check failed: " + error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    previewFrame.addEventListener("load", () => {
+      if (previewFrame.src) previewStatus.textContent = "Preview navigation completed. Sites that block framing can be opened in a new tab.";
+    });
 
     document.getElementById("codingMode").addEventListener("change", refreshCtx);
     

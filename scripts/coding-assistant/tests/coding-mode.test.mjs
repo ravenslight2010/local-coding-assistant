@@ -87,9 +87,9 @@ test("coding mode adds a bounded, approval-first workflow to the model prompt", 
   const request = modelRequests[0];
   assert.equal(request.model, "fixture-coder");
   assert.equal(request.messages[0].role, "system");
-  assert.match(request.messages[0].content, /Coding mode is enabled/);
+  assert.match(request.messages[0].content, /Coding mode is ON/);
   assert.match(request.messages[0].content, /"tool":"search"/);
   assert.match(request.messages[0].content, /"tool":"read"/);
-  assert.match(request.messages[0].content, /require approval/);
+  assert.match(request.messages[0].content, /approval required/);
   assert.match(request.messages[0].content, /untrusted data/);
 });
