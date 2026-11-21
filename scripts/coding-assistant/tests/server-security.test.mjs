@@ -133,6 +133,45 @@ test("routes approved git_pr tools to the PR handler", async () => {
   assert.deepEqual(await appliedResponse.json(), { error: "no GITHUB_TOKEN in secrets" });
 });
 
+test("creates and patches new files under the selected repository", async () => {
+  const traversalResponse = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "create", path: "../escape.txt", content: "outside" },
+  }));
+  assert.equal(traversalResponse.status, 400);
+  assert.equal(existsSync(path.join(tempRoot, "escape.txt")), false);
+
+  const createResponse = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "create", path: "new-file.txt", content: "created content" },
+  }));
+  assert.equal(createResponse.status, 200);
+  const { approvalId: createApprovalId } = await createResponse.json();
+  const createApply = await post("/api/tool/apply", JSON.stringify({ approvalId: createApprovalId }));
+  assert.equal(createApply.status, 200);
+  assert.equal(readFileSync(path.join(fixtureRepo, "new-file.txt"), "utf8"), "created content");
+
+  const patchResponse = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "patch", files: [{ path: "nested/new-file.txt", content: "patched content" }] },
+  }));
+  assert.equal(patchResponse.status, 200);
+  const { approvalId: patchApprovalId } = await patchResponse.json();
+  const patchApply = await post("/api/tool/apply", JSON.stringify({ approvalId: patchApprovalId }));
+  assert.equal(patchApply.status, 200);
+  assert.equal(readFileSync(path.join(fixtureRepo, "nested", "new-file.txt"), "utf8"), "patched content");
+});
+
+test("prepares the advertised Git tools for explicit approval", async () => {
+  const tools = [
+    { tool: "git_status" },
+    { tool: "git_pull" },
+    { tool: "git_push", remote: "origin", branch: "feature/test" },
+    { tool: "git_clone", url: "https://github.com/example/repo.git", dest: "repo-copy" },
+  ];
+  for (const tool of tools) {
+    const response = await post("/api/tool/prepare", JSON.stringify({ tool }));
+    assert.equal(response.status, 200, tool.tool);
+  }
+});
+
 test("web test accepts only explicit local HTTP preview URLs", async () => {
   const urls = [
     "https://127.0.0.1:3000/",

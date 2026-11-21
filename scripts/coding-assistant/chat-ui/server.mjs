@@ -179,7 +179,7 @@ Read-only tools:
 \`\`\`tool
 {"tool":"outline","path":"relative/file"}
 \`\`\`
-Git tools (status is read-only; pull/push/clone/PR creation need approval):
+Git tools (all use approval; status is read-only):
 \`\`\`tool
 {"tool":"git_status"}
 \`\`\`
@@ -228,6 +228,38 @@ function safeResolve(root, rel) {
   }
 }
 
+function safeResolveForCreate(root, rel) {
+  const value = String(rel || "").replace(/\\/g, "/");
+  if (value.includes("\0") || value.startsWith("/") || /^[A-Za-z]:/.test(value)) return null;
+  const segments = value.split("/");
+  if (segments.some((segment) => segment === ".." || segment.toLowerCase() === ".git")) return null;
+  const cleaned = segments.filter((segment) => segment && segment !== ".").join("/");
+  const abs = path.resolve(root, cleaned);
+  const relative = path.relative(root, abs);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+
+  let parent = path.dirname(abs);
+  while (!existsSync(parent)) {
+    const next = path.dirname(parent);
+    if (next === parent) return null;
+    parent = next;
+  }
+  try {
+    if (!statSync(parent).isDirectory()) return null;
+    const realRoot = realpathSync(root);
+    const realParent = realpathSync(parent);
+    const parentRelative = path.relative(realRoot, realParent);
+    if (parentRelative === ".." || parentRelative.startsWith(`..${path.sep}`) || path.isAbsolute(parentRelative)) return null;
+    const missingPath = path.relative(parent, path.dirname(abs));
+    const resolvedParent = path.resolve(realParent, missingPath);
+    const resolvedRelative = path.relative(realRoot, resolvedParent);
+    if (resolvedRelative === ".." || resolvedRelative.startsWith(`..${path.sep}`) || path.isAbsolute(resolvedRelative)) return null;
+    return path.join(resolvedParent, path.basename(abs));
+  } catch {
+    return null;
+  }
+}
+
 function normalizeTool(root, tool) {
   if (!tool || typeof tool !== "object" || Array.isArray(tool)) return null;
   if (tool.tool === "edit" && typeof tool.path === "string" && typeof tool.old === "string" && tool.old.length > 0) {
@@ -236,7 +268,7 @@ function normalizeTool(root, tool) {
     return { tool: "edit", path: path.relative(root, abs).replace(/\\/g, "/"), old: tool.old, new: String(tool.new || "") };
   }
   if (tool.tool === "create" && typeof tool.path === "string" && typeof tool.content === "string") {
-    const abs = safeResolve(root, tool.path);
+    const abs = safeResolveForCreate(root, tool.path);
     if (!abs || isProtectedRepositoryPath(tool.path)) return null;
     return { tool: "create", path: tool.path.replace(/\\/g, "/"), content: tool.content };
   }
@@ -1193,7 +1225,7 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       return send(res, 400, { error: "old text not found" });
     }
     if (tool.tool === "create") {
-      const abs = safeResolve(root, tool.path);
+      const abs = safeResolveForCreate(root, tool.path);
       if (!abs) return send(res, 400, { error: "invalid path" });
       if (existsSync(abs)) return send(res, 409, { error: "file exists" });
       const dir = path.dirname(abs);
@@ -1206,7 +1238,8 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       const applied = [];
       const failed = [];
       for (const f of tool.files) {
-        const abs = safeResolve(root, f.path);
+        const isNewFile = typeof f.content === "string" && !f.old;
+        const abs = isNewFile ? safeResolveForCreate(root, f.path) : safeResolve(root, f.path);
         if (!abs || isProtectedRepositoryPath(f.path)) { failed.push({ path: f.path, error: "invalid" }); continue; }
         try {
           if (typeof f.content === "string" && !f.old) {

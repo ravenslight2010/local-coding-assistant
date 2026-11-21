@@ -11,11 +11,11 @@ test("auto mode applies file edits but not Git or shell operations", () => {
   }
 });
 
-test("Code loop routes PR proposals through the existing approval path", () => {
-  for (const tool of ["edit", "shell", "git_pr"]) {
+test("Code loop routes supported file and Git tools through approval", () => {
+  for (const tool of ["edit", "create", "patch", "shell", "git_status", "git_pull", "git_push", "git_clone", "git_pr"]) {
     assert.equal(supportsCodingLoopTool(tool), true, tool);
   }
-  for (const tool of ["unknown", "goldset", "git_push"]) {
+  for (const tool of ["unknown", "goldset"]) {
     assert.equal(supportsCodingLoopTool(tool), false, tool);
   }
 });

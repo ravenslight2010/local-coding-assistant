@@ -105,7 +105,7 @@
     <span class="badge" id="ollama">ollama: …</span>
     <span class="badge" id="modelBadge">model</span>
     <label class="coding-toggle"><input id="codingMode" type="checkbox" checked /> Code loop</label>
-    <label class="coding-toggle" title="Auto-apply file edits and continue. Shell still asks."><input id="autoMode" type="checkbox" /> Auto</label>
+    <label class="coding-toggle" title="Auto-apply file edits and continue. Shell and Git tools still ask."><input id="autoMode" type="checkbox" /> Auto</label>
     <label class="coding-toggle" title="Include this repository's imported research context"><input id="contextPack" type="checkbox" /> Pack</label>
     <select id="model" aria-label="Model"></select>
     <button id="canvasToggle" type="button" aria-controls="canvasPanel" aria-expanded="false">Canvas</button>
@@ -266,6 +266,36 @@
       return el;
     }
 
+    function toolCardDescription(tool) {
+      switch (tool.tool) {
+        case "edit": return String(tool.path || "");
+        case "create": return `Create ${String(tool.path || "")}`;
+        case "patch": return `Patch ${(Array.isArray(tool.files) ? tool.files.filter((file) => file && typeof file === "object") : []).map((file) => String(file.path || "")).join(", ")}`;
+        case "shell": return String(tool.command || "");
+        case "git_status": return "Current repository";
+        case "git_pull": return "Fast-forward pull from the configured remote";
+        case "git_push": return `Push ${String(tool.branch || "")} to ${String(tool.remote || "")}`;
+        case "git_clone": return `Clone ${String(tool.url || "")} into ${String(tool.dest || "")}`;
+        case "git_pr": return `Create PR: ${String(tool.title || "")} → ${String(tool.base || "main")}`;
+        default: return String(tool.path || tool.command || "");
+      }
+    }
+
+    function toolCardPreview(tool) {
+      if (tool.tool === "edit") return `${String(tool.old || "")}\n---\n${String(tool.new || "")}`;
+      if (tool.tool === "create") return String(tool.content || "");
+      if (tool.tool === "patch") {
+        return (Array.isArray(tool.files) ? tool.files.filter((file) => file && typeof file === "object") : []).map((file) => {
+          const change = typeof file.content === "string"
+            ? file.content
+            : `${String(file.old || "")}\n---\n${String(file.new || "")}`;
+          return `--- ${String(file.path || "")}\n${change}`;
+        }).join("\n\n");
+      }
+      if (tool.tool === "git_pr") return `Base: ${String(tool.base || "main")}\n\n${String(tool.body || "")}`;
+      return "";
+    }
+
     function addToolCard(toolObj, waitForDecision = false) {
       const approvalSessionId = ensureSessionId();
       let resolveDecision;
@@ -276,10 +306,11 @@
       const heading = document.createElement("strong");
       heading.textContent = String(toolObj.tool || "Tool");
       card.appendChild(heading);
-      card.appendChild(document.createTextNode(" " + String(toolObj.path || toolObj.command || "")));
-      if (toolObj.old || toolObj.new) {
+      card.appendChild(document.createTextNode(" " + toolCardDescription(toolObj)));
+      const preview = toolCardPreview(toolObj);
+      if (preview) {
         const pre = document.createElement("pre");
-        pre.textContent = String(toolObj.old || "") + "\n---\n" + String(toolObj.new || "");
+        pre.textContent = preview.length > 4000 ? preview.slice(0, 4000) + "\n… preview truncated" : preview;
         card.appendChild(pre);
       }
       const status = document.createElement("span");
