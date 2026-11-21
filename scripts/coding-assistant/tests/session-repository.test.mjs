@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -142,4 +143,69 @@ test("two sessions retain independent repositories for files, tools, edits, and 
 
   const firstAgain = await fetch(baseUrl + "/api/file?path=identity.txt&sessionId=first-session");
   assert.equal((await firstAgain.json()).content, "first\n");
+});
+
+test("folder browsing lists only directories and requires a same-origin request", async () => {
+  writeFileSync(path.join(tempRoot, "not-a-folder.txt"), "");
+  const response = await post("/api/browse", { path: tempRoot });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.path, realpathSync(tempRoot));
+  assert.equal(result.isRepository, false);
+  assert.ok(result.folders.some((folder) => folder.path === realpathSync(secondRepo)));
+  assert.ok(!result.folders.some((folder) => folder.name === "not-a-folder.txt"));
+  const repository = await post("/api/browse", { path: secondRepo });
+  assert.equal((await repository.json()).isRepository, true);
+  assert.equal((await post("/api/browse", { path: "relative/path" })).status, 400);
+  assert.equal((await post("/api/browse", { path: path.join(tempRoot, "missing") })).status, 400);
+  assert.equal((await fetch(baseUrl + "/api/browse", {
+    method: "POST",
+    headers: { Origin: "https://example.invalid", "Content-Type": "application/json" },
+    body: JSON.stringify({ path: tempRoot }),
+  })).status, 403);
+});
+
+test("Browse opens inside the app and selects a repository at desktop and phone widths", {
+  skip: process.platform !== "win32" && !process.env.CA_TEST_BROWSER_PATH,
+}, async () => {
+  const runtime = path.join(sourceRepo, "scripts/coding-assistant/chat-ui/package.json");
+  const { chromium } = createRequire(runtime)("playwright-core");
+  const browser = await chromium.launch(process.env.CA_TEST_BROWSER_PATH
+    ? { executablePath: process.env.CA_TEST_BROWSER_PATH }
+    : { channel: "msedge" });
+  try {
+    for (const viewport of [{ width: 1366, height: 768 }, { width: 768, height: 900 }, { width: 390, height: 844 }]) {
+      const page = await browser.newPage({ viewport });
+      await page.addInitScript((id) => localStorage.setItem("ca_session", id), "first-session");
+      await page.goto(baseUrl);
+      const browseButton = page.getByRole("button", { name: "Browse", exact: true });
+      const dialog = page.getByRole("dialog", { name: "Choose a repository folder" });
+      await browseButton.focus();
+      await page.keyboard.press("Enter");
+      const folderPath = dialog.getByRole("textbox", { name: "Folder path" });
+      await folderPath.waitFor();
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden" });
+      assert.equal(await browseButton.evaluate((button) => document.activeElement === button), true);
+      await browseButton.click();
+      await folderPath.fill(path.join(tempRoot, "missing"));
+      await folderPath.press("Enter");
+      await dialog.getByText(/Couldn’t open the folder/).waitFor();
+      await folderPath.fill(tempRoot);
+      await folderPath.press("Enter");
+      const useFolder = dialog.getByRole("button", { name: "Use this folder" });
+      assert.equal(await useFolder.isDisabled(), true);
+      await dialog.getByRole("button", { name: "second", exact: true }).click();
+      await dialog.getByText(/Repository found/).waitFor();
+      const box = await dialog.boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= viewport.width);
+      await useFolder.click();
+      await dialog.waitFor({ state: "hidden" });
+      const saved = await (await fetch(baseUrl + "/api/session?id=first-session")).json();
+      assert.equal(saved.repo, realpathSync(secondRepo));
+      await page.close();
+    }
+  } finally {
+    await browser.close();
+  }
 });
