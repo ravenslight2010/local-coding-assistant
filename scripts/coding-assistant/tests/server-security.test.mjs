@@ -68,6 +68,7 @@ before(async () => {
   const env = { ...process.env, RUNCALC_REPO: fixtureRepo, CA_AGENT_ROOT: agentRoot };
   env.CA_ALLOW_SEARCH = "0";
   delete env.CA_ALLOW_SHELL;
+  delete env.GITHUB_TOKEN;
   serverProcess = spawn(process.execPath, [serverScript, "--port", String(port)], {
     cwd: repo,
     env,
@@ -112,6 +113,84 @@ test("rejects cross-origin tool preparation", async () => {
 test("requires JSON for same-origin API writes", async () => {
   const response = await post("/api/tool/prepare", "{}", { "Content-Type": "text/plain" });
   assert.equal(response.status, 415);
+});
+
+test("serves the client-side tool approval policy", async () => {
+  const response = await fetch(baseUrl + "/tool-policy.mjs");
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /canAutoApplyTool/);
+});
+
+test("routes approved git_pr tools to the PR handler", async () => {
+  const preparedResponse = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "git_pr", title: "Test PR", body: "Testing dispatch", base: "main" },
+  }));
+  assert.equal(preparedResponse.status, 200);
+  const { approvalId } = await preparedResponse.json();
+
+  const appliedResponse = await post("/api/tool/apply", JSON.stringify({ approvalId }));
+  assert.equal(appliedResponse.status, 400);
+  assert.deepEqual(await appliedResponse.json(), { error: "no GITHUB_TOKEN in secrets" });
+});
+
+test("creates and patches new files under the selected repository", async () => {
+  const traversalResponse = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "create", path: "../escape.txt", content: "outside" },
+  }));
+  assert.equal(traversalResponse.status, 400);
+  assert.equal(existsSync(path.join(tempRoot, "escape.txt")), false);
+
+  const createResponse = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "create", path: "new-file.txt", content: "created content" },
+  }));
+  assert.equal(createResponse.status, 200);
+  const { approvalId: createApprovalId } = await createResponse.json();
+  const createApply = await post("/api/tool/apply", JSON.stringify({ approvalId: createApprovalId }));
+  assert.equal(createApply.status, 200);
+  assert.equal(readFileSync(path.join(fixtureRepo, "new-file.txt"), "utf8"), "created content");
+
+  const patchResponse = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "patch", files: [{ path: "nested/new-file.txt", content: "patched content" }] },
+  }));
+  assert.equal(patchResponse.status, 200);
+  const { approvalId: patchApprovalId } = await patchResponse.json();
+  const patchApply = await post("/api/tool/apply", JSON.stringify({ approvalId: patchApprovalId }));
+  assert.equal(patchApply.status, 200);
+  assert.equal(readFileSync(path.join(fixtureRepo, "nested", "new-file.txt"), "utf8"), "patched content");
+
+  const overwrite = await post("/api/tool/prepare", JSON.stringify({
+    tool: { tool: "patch", files: [{ path: "nested/new-file.txt", content: "replacement" }] },
+  }));
+  assert.equal(overwrite.status, 200);
+  const { approvalId: overwriteId } = await overwrite.json();
+  const rejectedOverwrite = await post("/api/tool/apply", JSON.stringify({ approvalId: overwriteId }));
+  assert.equal((await rejectedOverwrite.json()).ok, false);
+  assert.equal(readFileSync(path.join(fixtureRepo, "nested", "new-file.txt"), "utf8"), "patched content");
+});
+
+test("file creation rejects protected and out-of-repository directory aliases", async () => {
+  mkdirSync(path.join(fixtureRepo, ".git"), { recursive: true });
+  symlinkSync(path.join(fixtureRepo, ".git"), path.join(fixtureRepo, "metadata"), "junction");
+  symlinkSync(tempRoot, path.join(fixtureRepo, "outside-dir"), "junction");
+  for (const path of ["metadata/nested/new.txt", "outside-dir/nested/new.txt"]) {
+    const response = await post("/api/tool/prepare", JSON.stringify({
+      tool: { tool: "create", path, content: "not written" },
+    }));
+    assert.equal(response.status, 400, path);
+  }
+});
+
+test("prepares the advertised Git tools for explicit approval", async () => {
+  const tools = [
+    { tool: "git_status" },
+    { tool: "git_pull" },
+    { tool: "git_push", remote: "origin", branch: "feature/test" },
+    { tool: "git_clone", url: "https://github.com/example/repo.git", dest: "repo-copy" },
+  ];
+  for (const tool of tools) {
+    const response = await post("/api/tool/prepare", JSON.stringify({ tool }));
+    assert.equal(response.status, 200, tool.tool);
+  }
 });
 
 test("web test accepts only explicit local HTTP preview URLs", async () => {

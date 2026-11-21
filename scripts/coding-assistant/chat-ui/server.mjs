@@ -13,6 +13,7 @@ import { addMemory, searchMemory, listMemory } from "./lib/memory-store.mjs";
 import { trimMessages } from "./lib/trim.mjs";
 import { listWorkflows, getWorkflow } from "./lib/workflows.mjs";
 import { discoverTests, planFor } from "./lib/testing.mjs";
+import { gitEnvironment } from "./lib/git-auth.mjs";
 import { execFileSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -178,7 +179,7 @@ Read-only tools:
 \`\`\`tool
 {"tool":"outline","path":"relative/file"}
 \`\`\`
-Git tools (status is free; pull/push/clone need approval):
+Git tools (all use approval; status is read-only):
 \`\`\`tool
 {"tool":"git_status"}
 \`\`\`
@@ -220,8 +221,43 @@ function safeResolve(root, rel) {
     const realRoot = realpathSync(root);
     const realAbs = realpathSync(abs);
     const realRelative = path.relative(realRoot, realAbs);
-    if (realRelative === ".." || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative)) return null;
+    if (realRelative === ".." || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative) || realRelative.split(path.sep).some((segment) => segment.toLowerCase() === ".git")) return null;
     return realAbs;
+  } catch {
+    return null;
+  }
+}
+
+function safeResolveForCreate(root, rel) {
+  const value = String(rel || "").replace(/\\/g, "/");
+  if (value.includes("\0") || value.startsWith("/") || /^[A-Za-z]:/.test(value)) return null;
+  const segments = value.split("/");
+  if (segments.some((segment) => segment === ".." || segment.toLowerCase() === ".git")) return null;
+  const cleaned = segments.filter((segment) => segment && segment !== ".").join("/");
+  const abs = path.resolve(root, cleaned);
+  const relative = path.relative(root, abs);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+
+  let parent = path.dirname(abs);
+  while (!existsSync(parent)) {
+    const next = path.dirname(parent);
+    if (next === parent) return null;
+    parent = next;
+  }
+  try {
+    if (!statSync(parent).isDirectory()) return null;
+    const realRoot = realpathSync(root);
+    const realParent = realpathSync(parent);
+    const parentRelative = path.relative(realRoot, realParent);
+    if (parentRelative === ".." || parentRelative.startsWith(`..${path.sep}`) || path.isAbsolute(parentRelative)) return null;
+    const missingPath = path.relative(parent, path.dirname(abs));
+    const resolvedParent = path.resolve(realParent, missingPath);
+    const resolvedRelative = path.relative(realRoot, resolvedParent);
+    if (resolvedRelative === ".." || resolvedRelative.startsWith(`..${path.sep}`) || path.isAbsolute(resolvedRelative)) return null;
+    const target = path.join(resolvedParent, path.basename(abs));
+    const targetRelative = path.relative(realRoot, target);
+    if (isProtectedRepositoryPath(targetRelative) || targetRelative.split(path.sep).some((segment) => segment.toLowerCase() === ".git")) return null;
+    return target;
   } catch {
     return null;
   }
@@ -235,7 +271,7 @@ function normalizeTool(root, tool) {
     return { tool: "edit", path: path.relative(root, abs).replace(/\\/g, "/"), old: tool.old, new: String(tool.new || "") };
   }
   if (tool.tool === "create" && typeof tool.path === "string" && typeof tool.content === "string") {
-    const abs = safeResolve(root, tool.path);
+    const abs = safeResolveForCreate(root, tool.path);
     if (!abs || isProtectedRepositoryPath(tool.path)) return null;
     return { tool: "create", path: tool.path.replace(/\\/g, "/"), content: tool.content };
   }
@@ -971,6 +1007,7 @@ async function handleRequest(req, res) {
       "/manifest.webmanifest": ["manifest.webmanifest", "application/manifest+json; charset=utf-8"],
       "/sw.js": ["sw.js", "application/javascript; charset=utf-8"],
       "/chat-stream.mjs": ["chat-stream.mjs", "application/javascript; charset=utf-8"],
+      "/tool-policy.mjs": ["tool-policy.mjs", "application/javascript; charset=utf-8"],
     };
     const hit = staticMap[url.pathname];
     if (hit) {
@@ -1160,16 +1197,7 @@ if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPa
   
 function gitEnv() {
   const token = getSecret(AGENT_ROOT, "GITHUB_TOKEN") || process.env.GITHUB_TOKEN || "";
-  const env = { ...process.env };
-  if (token) {
-    env.GIT_ASKPASS = path.join(AGENT_ROOT, "config", "git-askpass.cmd");
-    env.GIT_TERMINAL_PROMPT = "0";
-    // Write a tiny askpass that echoes the token
-    const ask = path.join(AGENT_ROOT, "config", "git-askpass.cmd");
-    if (!existsSync(path.dirname(ask))) mkdirSync(path.dirname(ask), { recursive: true });
-    writeFileSync(ask, `@echo off\r\necho ${token}\r\n`, { mode: 0o700 });
-  }
-  return env;
+  return gitEnvironment(process.env, token);
 }
 
 if (req.method === "POST" && url.pathname === "/api/tool/apply") {
@@ -1200,7 +1228,7 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       return send(res, 400, { error: "old text not found" });
     }
     if (tool.tool === "create") {
-      const abs = safeResolve(root, tool.path);
+      const abs = safeResolveForCreate(root, tool.path);
       if (!abs) return send(res, 400, { error: "invalid path" });
       if (existsSync(abs)) return send(res, 409, { error: "file exists" });
       const dir = path.dirname(abs);
@@ -1213,10 +1241,12 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       const applied = [];
       const failed = [];
       for (const f of tool.files) {
-        const abs = safeResolve(root, f.path);
-        if (!abs || isProtectedRepositoryPath(f.path)) { failed.push({ path: f.path, error: "invalid" }); continue; }
+        const isNewFile = typeof f.content === "string" && !f.old;
+        const abs = isNewFile ? safeResolveForCreate(root, f.path) : safeResolve(root, f.path);
+        if (!abs || isProtectedRepositoryPath(f.path) || isProtectedRepositoryPath(path.relative(root, abs))) { failed.push({ path: f.path, error: "invalid" }); continue; }
         try {
           if (typeof f.content === "string" && !f.old) {
+            if (existsSync(abs)) { failed.push({ path: f.path, error: "file exists" }); continue; }
             if (!existsSync(path.dirname(abs))) mkdirSync(path.dirname(abs), { recursive: true });
             atomicWriteFile(abs, f.content, 0o644);
             applied.push(f.path);
@@ -1280,11 +1310,11 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       const audited = recordToolAudit(approval, { outcome: timedOut ? "timeout" : "completed", code, timedOut, truncated });
       return send(res, 200, { ok: code === 0 && !timedOut, code, timedOut, truncated, output: out, audited });
     }
-    if (tool.tool === "git_status" || tool.tool === "git_pull" || tool.tool === "git_push" || tool.tool === "git_clone") {
+    if (tool.tool === "git_status" || tool.tool === "git_pull" || tool.tool === "git_push" || tool.tool === "git_clone" || tool.tool === "git_pr") {
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
       const exec = promisify(execFile);
-      const safeName = (s) => /^[A-Za-z0-9._/-]+$/.test(s) && !s.includes("..");
+      const safeName = (s) => /^[A-Za-z0-9._/-]+$/.test(s) && !s.startsWith("-") && !s.includes("..");
       try {
         if (tool.tool === "git_status") {
           const r = await exec("git", ["status", "--short", "--branch"], { cwd: root, timeout: 15000 });
@@ -1317,7 +1347,7 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
         }
         if (tool.tool === "git_clone") {
           if (!/^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(\.git)?$/.test(tool.url)) return send(res, 400, { error: "only https github urls" });
-          if (!safeName(tool.dest)) return send(res, 400, { error: "invalid dest" });
+          if (!safeName(tool.dest) || tool.dest.startsWith("/") || tool.dest.split("/").some((part) => !part || part === "." || part.toLowerCase() === ".git")) return send(res, 400, { error: "invalid dest" });
           const dest = path.resolve(root, "..", tool.dest);
           const r = await exec("git", ["clone", tool.url, dest], { timeout: 120000 });
           return send(res, 200, { ok: true, dest, output: String(r.stdout || r.stderr || "").slice(0, 4000) });

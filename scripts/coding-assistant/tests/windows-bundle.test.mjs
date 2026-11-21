@@ -71,6 +71,9 @@ test("canonical Windows bundle is complete and its packaged server starts", { sk
     const stream = await fetch(`http://127.0.0.1:${port}/chat-stream.mjs`);
     assert.equal(stream.status, 200);
     assert.match(await stream.text(), /consumeChatStream/);
+    const toolPolicy = await fetch(`http://127.0.0.1:${port}/tool-policy.mjs`);
+    assert.equal(toolPolicy.status, 200);
+    assert.match(await toolPolicy.text(), /canAutoApplyTool/);
     assert.ok(readdirSync(agentRoot).includes("sessions"));
   } finally {
     if (child && child.exitCode === null) {

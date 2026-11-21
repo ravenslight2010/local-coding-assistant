@@ -53,10 +53,11 @@ Tools:
 - create (new file, approval)
 - patch (up to 8 related files in one approval)
 - shell (approval, opt-in)
+- Git status, pull, push, clone, and PR creation (approval required)
 
 Skills: refactor, debug, code-review, multi-file-edit.
 
 ## Auto
-- Auto toggle: file edits, creates, and patches apply without a prompt. Shell still asks.
+- Auto toggle: file edits, creates, and patches apply without a prompt. Shell and Git tools still ask.
 - Next task: loads the highest-priority open task into the input.
 - Tool actions stay in the audit log either way.
