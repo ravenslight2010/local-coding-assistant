@@ -494,6 +494,11 @@
     }
 
     async function requestAssistantTurn(codingMode, signal, repositoryContext) {
+      const ollamaBadge = document.getElementById("ollama");
+      if (ollamaBadge && ollamaBadge.textContent.includes("down")) {
+        addMsg("system", "Ollama is down. Start it with: ollama serve");
+        return { full: "", tools: [] };
+      }
       const turnSession = ensureSessionId();
       const assistantEl = addMsg("assistant", "");
       let full = "";
@@ -929,7 +934,9 @@ document.getElementById("expBtn").onclick = async () => {
     };
 
     async function health() {
-      const r = await fetch(sessionUrl("/api/health"));
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(sessionUrl("/api/health"), { signal: ctrl.signal }).finally(() => clearTimeout(t));
       const h = await r.json();
       currentRepo = h.repoRoot || "";
       const rp = document.getElementById("repoPath"); rp.value = currentRepo; rp.title = currentRepo;
