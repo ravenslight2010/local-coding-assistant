@@ -3,10 +3,10 @@
 ## Current pin
 `Get-CodeAgent.cmd` installs immutable source:
 
-- Commit: `cdd0be64f1aa99a3f834f8e33945dbf19829beaf`
-- Archive SHA-256: `fabbde1c78511448ddc7ef8c724cba26394478e648101fb5300783019e6de6fa`
+- Commit: `de9d69814e29c118b60a8e9feb4bcd7eb01669b7`
+- Archive SHA-256: `ce382c24eff4c6f726303c9cb70d4d33b83ed5609ea31af0767115a1d300e2d0`
 
-This pin includes the Stop button for chat and Code loop and keeps the selected repository when starting a new chat.
+This pin restores chat, Stop, and optional browser setup. The updater replaces only the installed Code Agent server; it does not stop a different program using the port.
 
 ## How to run
 Double-click `Get-CodeAgent.cmd`. It requests Administrator, verifies the zip, then runs setup.
