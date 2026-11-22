@@ -118,12 +118,11 @@
   <header>
     <h1>Code Agent</h1>
     <span class="badge" id="mode">local</span>
-    <span class="badge" id="searchBadge">search: off</span>
+    <span class="badge" id="searchBadge">search: on</span>
     <span class="badge" id="ollama">ollama: …</span>
     <span class="badge" id="modelBadge">model</span>
-    <label class="coding-toggle"><input id="codingMode" type="checkbox" checked /> Code loop</label>
-    <label class="coding-toggle" title="Auto-apply file edits and continue. Shell and Git tools still ask."><input id="autoMode" type="checkbox" /> Auto</label>
-    <label class="coding-toggle" title="Include this repository's imported research context"><input id="contextPack" type="checkbox" /> Pack</label>
+    <span class="badge">code</span>
+    <span class="badge">auto</span>
     <select id="model" aria-label="Model"></select>
     <button id="canvasToggle" type="button" aria-controls="canvasPanel" aria-expanded="false">Canvas</button>
     <button id="newSess" title="New session">New</button>
@@ -274,7 +273,7 @@
     let currentTaskId = null;
     const contextFiles = new Set();
     const activeSkills = new Set();
-    let searchEnabled = false;
+    let searchEnabled = true;
     let currentRepo = "";
     let includeContext = false;
     let estimateSequence = 0;
@@ -432,7 +431,7 @@
           if (!r.ok) throw new Error(data.error || "tool request rejected");
           approvalId = data.approvalId;
           allow.disabled = false;
-          const auto = document.getElementById("autoMode") && document.getElementById("autoMode").checked;
+          const auto = true;
           if (auto && canAutoApplyTool(toolObj.tool)) {
             status.textContent = "Auto-applying…";
             allow.click();
@@ -664,7 +663,6 @@
       sessionId = null;
       messages = [];
       includeContext = false;
-      document.getElementById("contextPack").checked = false;
       log.innerHTML = "";
       addMsg("system", "Task: " + t.title + " (" + t.type + ")");
       if (t.skill) {
@@ -712,7 +710,7 @@
       localStorage.setItem("ca_session", id);
       messages = s.messages || [];
       includeContext = s.includeContext === true;
-      document.getElementById("contextPack").checked = includeContext;
+      true = includeContext;
       currentRepo = s.repo || "";
       const rp = document.getElementById("repoPath"); rp.value = currentRepo; rp.title = currentRepo;
       contextFiles.clear();
@@ -733,7 +731,7 @@
       document.getElementById("ctxLabel").textContent = (contextFiles.size ? "Files: " + [...contextFiles].join(", ") : "Files: none") + (includeContext ? " · pack on" : " · pack off");
       document.getElementById("meterText").textContent = "estimating…";
       try {
-        const codingMode = document.getElementById("codingMode").checked;
+        const codingMode = true;
         const r = await fetch("/api/context/estimate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -810,7 +808,7 @@
       const d = await r.json();
       addMsg("system", r.ok ? "Imported " + d.name + " into context pack" : "Import failed");
     };
-    document.getElementById("contextPack").onchange = async (event) => {
+    /* context always on */ const _ctx = async (event) => {
       includeContext = event.target.checked;
       await saveSession();
       refreshCtx();
@@ -951,7 +949,7 @@ document.getElementById("expBtn").onclick = async () => {
     });
 
 document.getElementById("searchBadge").onclick = () => {
-      searchEnabled = !searchEnabled;
+      searchEnabled = true;
       const b = document.getElementById("searchBadge");
       b.textContent = searchEnabled ? "search: on" : "search: off";
       b.className = searchEnabled ? "badge ok" : "badge";
@@ -991,7 +989,6 @@ document.getElementById("searchBadge").onclick = () => {
       input.value = currentRepo;
       contextFiles.clear();
       includeContext = false;
-      document.getElementById("contextPack").checked = false;
       await saveSession();
       await Promise.all([health(), loadTree(""), loadSkills()]);
       refreshCtx();
@@ -1350,7 +1347,7 @@ document.getElementById("searchBadge").onclick = () => {
       if (previewFrame.src) previewStatus.textContent = "Preview navigation completed. Sites that block framing can be opened in a new tab.";
     });
 
-    document.getElementById("codingMode").addEventListener("change", refreshCtx);
+    /* code always on */
     
     document.getElementById("input").addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
@@ -1381,8 +1378,7 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
         addMsg("user", text);
       }
       const send = document.getElementById("send");
-      const codingToggle = document.getElementById("codingMode");
-      const codingMode = codingToggle.checked;
+      const codingMode = true;
       const turnSession = ensureSessionId();
       const controller = new AbortController();
       activeRun = controller;
