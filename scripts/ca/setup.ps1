@@ -357,6 +357,23 @@ function Ensure-TestingStack {
 
 
 
+
+function Ensure-Docker {
+  if (HasCmd "docker") { Info "Docker already installed"; return }
+  Step "Docker Desktop"
+  Info "Installing Docker Desktop"
+  $installer = Join-Path $env:TEMP "DockerDesktopInstaller.exe"
+  try {
+    Invoke-WebRequest "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe" -OutFile $installer -UseBasicParsing
+    $p = Start-Process $installer -ArgumentList @("install", "--quiet", "--accept-license") -Wait -PassThru
+    if ($p.ExitCode -eq 0) { Info "Docker Desktop installed; a reboot or manual start may be needed" }
+    else { Info "Docker installer exited $($p.ExitCode); Windmill and Activepieces will be skipped" }
+  } catch {
+    Info "Docker install failed: $($_.Exception.Message)"
+  }
+  Refresh-Path
+}
+
 function Ensure-WorkflowTools {
   Step "Free workflow tools"
   # Node-RED: light, npm
@@ -412,6 +429,7 @@ try {
   Ensure-Model $model
   Copy-App $repo $model
   Ensure-TestingStack
+  Ensure-Docker
   Ensure-WorkflowTools
   Create-Shortcuts
   Verify-Installation $model
