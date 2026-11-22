@@ -30,6 +30,7 @@
     .file.active,.skill-btn.active { background:var(--panel-2); outline:1px solid var(--accent); }
     .chat { display:flex; flex-direction:column; min-height:0; position:relative; }
     #log { flex:1; overflow:auto; padding:0.9rem 1rem; display:flex; flex-direction:column; gap:0.55rem; }
+    .msg-time { float: right; opacity: 0.5; font-size: 0.75em; margin-left: 8px; }
     .msg { max-width:900px; padding:0.65rem 0.9rem; border-radius:12px; line-height:1.45; font-size:0.93rem; white-space:pre-wrap; word-break:break-word; position:relative; }
     .msg.user { background:var(--user); align-self:flex-end; border-bottom-right-radius:4px; }
     .msg.assistant { background:var(--assistant); align-self:flex-start; border-bottom-left-radius:4px; }
@@ -343,7 +344,11 @@
     function addMsg(role, text) {
       const el = document.createElement("div");
       el.className = "msg " + role;
-      el.textContent = text;
+      const stamp = document.createElement("span");
+      stamp.className = "msg-time";
+      stamp.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      el.appendChild(stamp);
+      el.appendChild(document.createTextNode(text));
       log.appendChild(el);
       log.scrollTop = log.scrollHeight;
       return el;
