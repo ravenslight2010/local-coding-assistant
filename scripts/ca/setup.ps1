@@ -245,7 +245,7 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     '$listenerIds = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)'
     'foreach ($listenerId in $listenerIds) {'
     '  $listener = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerId"'
-    '  if ($listener.Name -ne ''node.exe'' -or $listener.CommandLine -notmatch $serverArg) { throw "Port $port is in use by another program. Code Agent did not stop it." }'
+    '  if ($listener.Name -eq ''node.exe'' -and $listener.CommandLine -match $serverArg) { Write-Host "Already running."; & (Join-Path $app ''ui\open-app.ps1'') -Port $port; exit 0 }'
     '}'
     'foreach ($listenerId in $listenerIds) {'
     '  Stop-Process -Id $listenerId'
