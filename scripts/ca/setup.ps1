@@ -356,6 +356,50 @@ function Ensure-TestingStack {
 }
 
 
+
+function Ensure-WorkflowTools {
+  Step "Free workflow tools"
+  # Node-RED: light, npm
+  if (HasCmd "node-red") { Info "Node-RED already installed" }
+  else {
+    Info "Installing Node-RED"
+    & npm install -g --unsafe-perm node-red 2>&1 | Out-Null
+    if (HasCmd "node-red") { Info "Node-RED ready (run: node-red)" }
+    else { Info "Node-RED install failed; continuing" }
+  }
+  # Docker-based tools
+  if (-not (HasCmd "docker")) { Info "Docker not found; skipping Windmill and Activepieces"; return }
+  Info "Docker present; starting Windmill and Activepieces"
+  $compose = Join-Path $AgentRoot "workflow-tools.yml"
+  @"
+services:
+  windmill-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: windmill
+      POSTGRES_DB: windmill
+    volumes: ["windmill-db:/var/lib/postgresql/data"]
+  windmill:
+    image: ghcr.io/windmill-labs/windmill:main
+    ports: ["8000:8000"]
+    environment:
+      DATABASE_URL: postgres://postgres:windmill@windmill-db/windmill?sslmode=disable
+    depends_on: [windmill-db]
+  activepieces:
+    image: activepieces/activepieces:latest
+    ports: ["8080:80"]
+    environment:
+      AP_ENGINE_EXECUTABLE_PATH: dist/packages/server/api/main.js
+    volumes: ["activepieces:/root/.activepieces"]
+volumes:
+  windmill-db:
+  activepieces:
+"@ | Set-Content -LiteralPath $compose -Encoding ASCII
+  & docker compose -f $compose up -d 2>&1 | Out-Null
+  if ($LASTEXITCODE -eq 0) { Info "Windmill on :8000, Activepieces on :8080" }
+  else { Info "Docker compose failed; tools not started" }
+}
+
 try {
   Step "Code Agent Setup"
   $repo = Get-Repo
@@ -368,6 +412,7 @@ try {
   Ensure-Model $model
   Copy-App $repo $model
   Ensure-TestingStack
+  Ensure-WorkflowTools
   Create-Shortcuts
   Verify-Installation $model
   if ($LaunchChat -and -not $NoLaunch) {
