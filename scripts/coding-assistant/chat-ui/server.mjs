@@ -965,6 +965,7 @@ async function handleRequest(req, res) {
 
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
     if (!existsSync(publicIndex)) return send(res, 500, { error: "index.html missing" });
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     return send(res, 200, readFileSync(publicIndex, "utf8"), "text/html; charset=utf-8");
   }
 
@@ -1110,6 +1111,7 @@ async function handleRequest(req, res) {
       "/tool-policy.mjs": ["tool-policy.mjs", "application/javascript; charset=utf-8"],
     };
     const hit = staticMap[url.pathname];
+    if (hit) res.setHeader("Cache-Control", "no-cache");
     if (hit) {
       const abs = path.join(__dirname, hit[0]);
       if (existsSync(abs)) {
