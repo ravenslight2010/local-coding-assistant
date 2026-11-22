@@ -253,8 +253,13 @@ test("Browse opens inside the app and selects a repository at desktop and phone 
       const saved = await (await fetch(baseUrl + "/api/session?id=first-session")).json();
       assert.equal(saved.repo, realpathSync.native(secondRepo));
       const parent = path.join(tempRoot, "new", "projects");
+      let missingEndpoint = true;
       await page.route("**/api/repo/clone", async (route) => {
         assert.deepEqual(route.request().postDataJSON(), { url: "https://github.com/example/project", parent });
+        if (missingEndpoint) {
+          missingEndpoint = false;
+          return route.fulfill({ status: 404, json: { error: "not found" } });
+        }
         await route.fulfill({ json: { root: realpathSync.native(firstRepo) } });
       });
       await browseButton.click();
@@ -262,6 +267,8 @@ test("Browse opens inside the app and selects a repository at desktop and phone 
       const githubUrl = dialog.getByRole("textbox", { name: "GitHub repository URL" });
       await githubUrl.fill("https://github.com/example/project");
       await dialog.getByRole("textbox", { name: "Save inside folder (optional)" }).fill(parent);
+      await githubUrl.press("Enter");
+      await dialog.getByText(/connected to an older Code Agent server/).waitFor();
       await githubUrl.press("Enter");
       await dialog.waitFor({ state: "hidden" });
       const afterClone = await (await fetch(baseUrl + "/api/session?id=first-session")).json();

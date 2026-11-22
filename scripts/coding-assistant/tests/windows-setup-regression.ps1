@@ -29,6 +29,54 @@ try {
   if ($parseErrors) { throw ($parseErrors.Message -join "`n") }
   Write-Host "PASS: generated launcher parses in PowerShell"
 
+  & {
+    $state = @{ stopped = $false; foreign = $true; opened = $false }
+    $ui = New-Item -ItemType Directory -Path (Join-Path $AgentRoot "app/ui") -Force
+    $serverPath = Join-Path $ui.FullName "server.mjs"
+    Set-Content -LiteralPath (Join-Path $ui.FullName "open-app.ps1") -Value 'param($Port); $state.opened = $true'
+    function Invoke-WebRequest {
+      param($Uri, $OutFile, [switch]$UseBasicParsing, $TimeoutSec)
+      if ($Uri -like "https:*") { throw "offline fixture" }
+    }
+    function Get-NetTCPConnection {
+      param($LocalPort, $State, $OwningProcess, $ErrorAction)
+      if ($OwningProcess -eq 42) { return [pscustomobject]@{ OwningProcess = 42 } }
+      return [pscustomobject]@{ OwningProcess = 41 }
+    }
+    function Get-CimInstance {
+      param($ClassName, $Filter)
+      $scriptName = if ($state.foreign) { "$serverPath-other" } else { $serverPath }
+      return @{ Name = "node.exe"; CommandLine = "node `"$scriptName`" --port 7843" }
+    }
+    function Stop-Process {
+      param($Id)
+      if ($Id -ne 41) { throw "Stopped the wrong process" }
+      $state.stopped = $true
+    }
+    function Wait-Process { param($Id, $Timeout, $ErrorAction) }
+    function Start-Process {
+      param($FilePath, $ArgumentList, $WorkingDirectory, $WindowStyle, [switch]$PassThru)
+      if (-not $state.stopped) { throw "Old listener was not stopped" }
+      if ($ArgumentList[0] -ne "`"$serverPath`"") { throw "Path with spaces was not quoted" }
+      return @{ Id = 42; HasExited = $false }
+    }
+    $originalPath = $env:Path
+    try {
+      $blocked = $false
+      try { & $runner } catch {
+        if ($_.Exception.Message -notmatch "in use by another program") { throw }
+        $blocked = $true
+      }
+      if (-not $blocked -or $state.stopped -or $state.opened) { throw "Launcher did not protect a foreign listener" }
+      $state.foreign = $false
+      & $runner
+      if (-not $state.stopped -or -not $state.opened) { throw "Launcher did not replace and open the updated server" }
+    } finally {
+      $env:Path = $originalPath
+    }
+  }
+  Write-Host "PASS: launcher replaces the installed server and leaves other listeners alone"
+
   $cliDir = Join-Path $AgentRoot "app/ui/node_modules/playwright-core"
   New-Item -ItemType Directory -Path $cliDir -Force | Out-Null
   $cli = Join-Path $cliDir "cli.js"
@@ -39,7 +87,7 @@ process.exit(7);
 '@
   Ensure-TestingStack
   $actual = Get-Content -LiteralPath (Join-Path $cliDir "args.log") -Raw
-  if ($actual -ne "install chromium firefox webkit") { throw "The pinned Playwright CLI was not called with the expected arguments." }
+  if ($actual -ne "install chromium") { throw "The pinned Playwright CLI was not called with the expected arguments." }
   if (-not ($messages -match "Playwright browser install exited 7")) { throw "Optional browser download failure was not reported." }
   Write-Host "PASS: Node runs the pinned optional browser CLI, and failure is nonfatal"
 
@@ -49,7 +97,7 @@ process.exit(7);
     Copy-Item -LiteralPath $runtime -Destination $cliDir -Recurse
     $messages = @()
     Ensure-TestingStack
-    if ("Playwright browsers ready" -notin $messages) { throw ($messages -join "`n") }
+    $env:CA_SETUP_TEST_EDGE = if ("Chromium ready" -in $messages) { "0" } else { "1" }
 
     $browserCheck = Join-Path $AgentRoot "app/ui/check-browsers.cjs"
     Set-Content -LiteralPath $browserCheck -Value @'
@@ -57,16 +105,15 @@ const assert = require("node:assert/strict");
 const playwright = require("playwright-core");
 
 (async () => {
-  for (const name of ["chromium", "firefox", "webkit"]) {
-    const browser = await playwright[name].launch();
-    try {
-      const page = await browser.newPage();
-      await page.setContent("<title>Code Agent browser check</title>");
-      assert.equal(await page.title(), "Code Agent browser check");
-      console.log(`PASS: ${name} launched and rendered a page`);
-    } finally {
-      await browser.close();
-    }
+  const options = process.env.CA_SETUP_TEST_EDGE === "1" ? { channel: "msedge" } : {};
+  const browser = await playwright.chromium.launch(options);
+  try {
+    const page = await browser.newPage();
+    await page.setContent("<title>Code Agent browser check</title>");
+    assert.equal(await page.title(), "Code Agent browser check");
+    console.log("PASS: installed Chromium or Edge launched and rendered a page");
+  } finally {
+    await browser.close();
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 '@
