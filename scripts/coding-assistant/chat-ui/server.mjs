@@ -187,6 +187,7 @@ Start by reading or searching, then edit.
 Example first reply when asked what is in the repo:
 \`\`\`tool
 {"tool":"search","query":"package.json"}
+{"tool":"web_search","query":"what is X"}
 \`\`\`
 
 Read-only tools:
@@ -202,6 +203,8 @@ Read-only tools:
 Git tools (all use approval; status is read-only):
 \`\`\`tool
 {"tool":"git_status"}
+{"tool":"git_diff"}
+{"tool":"git_log","limit":10}
 \`\`\`
 \`\`\`tool
 {"tool":"git_pull"}
@@ -310,6 +313,8 @@ function normalizeTool(root, tool) {
     return { tool: "shell", command: tool.command };
   }
   if (tool.tool === "git_status") return { tool: "git_status" };
+  if (tool.tool === "git_diff") return { tool: "git_diff" };
+  if (tool.tool === "git_log") return { tool: "git_log", limit: Math.min(20, Number(tool.limit) || 10) };
   if (tool.tool === "git_pull") return { tool: "git_pull" };
   if (tool.tool === "git_push" && typeof tool.remote === "string" && typeof tool.branch === "string") {
     return { tool: "git_push", remote: tool.remote.slice(0, 40), branch: tool.branch.slice(0, 80) };
@@ -322,6 +327,7 @@ function normalizeTool(root, tool) {
   }
   if (tool.tool === "install_app") return { tool: "install_app" };
   if (tool.tool === "test") return { tool: "test", hint: String(tool.hint || "").slice(0, 200) };
+  if (tool.tool === "web_search" && typeof tool.query === "string") return { tool: "web_search", query: tool.query.slice(0, 200) };
   return null;
 }
 
@@ -1496,6 +1502,15 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       const exec = promisify(execFile);
       const safeName = (s) => /^[A-Za-z0-9._/-]+$/.test(s) && !s.startsWith("-") && !s.includes("..");
       try {
+        if (tool.tool === "git_diff") {
+          const r = await exec("git", ["diff", "--stat", "HEAD"], { cwd: root });
+          return send(res, 200, { ok: true, output: r.stdout.slice(0, 8000) });
+        }
+        if (tool.tool === "git_log") {
+          const n = tool.limit || 10;
+          const r = await exec("git", ["log", "--oneline", "-" + n], { cwd: root });
+          return send(res, 200, { ok: true, output: r.stdout.slice(0, 4000) });
+        }
         if (tool.tool === "git_status") {
           const r = await exec("git", ["status", "--short", "--branch"], { cwd: root, timeout: 15000 });
           return send(res, 200, { ok: true, output: String(r.stdout || "").slice(0, 4000) });
@@ -1544,6 +1559,23 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       return send(res, result.ok ? 200 : 400, { ...result, plan });
     }
 
+    if (tool.tool === "web_search") {
+      try {
+        const q = encodeURIComponent(tool.query);
+        const r = await fetch("https://api.duckduckgo.com/?q=" + q + "&format=json&no_html=1&skip_disambig=1");
+        const data = await r.json();
+        const bits = [];
+        if (data.AbstractText) bits.push(data.AbstractText);
+        if (data.RelatedTopics) {
+          for (const t of data.RelatedTopics.slice(0, 5)) {
+            if (t.Text) bits.push(t.Text);
+          }
+        }
+        return send(res, 200, { ok: true, output: bits.join("\n").slice(0, 4000) || "no results" });
+      } catch (e) {
+        return send(res, 200, { ok: false, output: "web search failed: " + e.message });
+      }
+    }
     if (tool.tool === "test") {
       const discovery = discoverTests(root);
       const plan = planFor(tool.hint || "", discovery);
