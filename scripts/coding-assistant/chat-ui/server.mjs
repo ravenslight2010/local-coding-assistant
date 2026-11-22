@@ -213,6 +213,12 @@ Write tools (approval required):
 \`\`\`tool
 {"tool":"patch","files":[{"path":"a","old":"...","new":"..."},{"path":"b","content":"new file"}]}
 \`\`\`
+Test tool (use this when asked to test; do not invent npm test):
+\`\`\`tool
+{"tool":"test","hint":"what changed"}
+\`\`\`
+It discovers the repo's real scripts and runs the ladder. Never run npm test unless the discovery says a test script exists.
+
 Inspect before editing. Prefer the smallest complete patch. If Auto is on, file tools apply without a prompt and you should continue to the next step (read result, edit, test) until done or blocked. Do not create a follow-up task. If more work belongs with the current task, say so and ask to include it in the current task. Update the covering test in the same change. One tool block per response. Never claim a test passed without its output. Do not read secret files.`;
 
 function safeResolve(root, rel) {
@@ -302,6 +308,7 @@ function normalizeTool(root, tool) {
     return { tool: "git_pr", title: tool.title.slice(0, 120), body: tool.body.slice(0, 2000), base: String(tool.base || "main").slice(0, 80) };
   }
   if (tool.tool === "install_app") return { tool: "install_app" };
+  if (tool.tool === "test") return { tool: "test", hint: String(tool.hint || "").slice(0, 200) };
   return null;
 }
 
@@ -1499,6 +1506,29 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       if (plan.error) return send(res, 400, { error: plan.error });
       const result = await runInstall(root, plan);
       return send(res, result.ok ? 200 : 400, { ...result, plan });
+    }
+
+    if (tool.tool === "test") {
+      const discovery = discoverTests(root);
+      const plan = planFor(tool.hint || "", discovery);
+      if (!plan.length) return send(res, 200, { ok: true, discovery, plan, output: "no tests discovered" });
+      const { spawn } = await import("node:child_process");
+      const isWin = process.platform === "win32";
+      const results = [];
+      for (const step of plan.slice(0, 4)) {
+        const child = spawn(isWin ? "cmd.exe" : "bash",
+          isWin ? ["/d", "/s", "/c", step.cmd] : ["-lc", step.cmd],
+          { cwd: root, windowsHide: true });
+        let out = "";
+        const append = (c) => { const t = c.toString(); if (out.length < 3000) out += t.slice(0, 3000 - out.length); };
+        child.stdout.on("data", append);
+        child.stderr.on("data", append);
+        const code = await new Promise((resolve) => { child.once("close", resolve); child.once("error", () => resolve(null)); });
+        results.push({ step: step.step, cmd: step.cmd, code, output: out.slice(0, 1500) });
+        if (code !== 0) break;
+      }
+      const ok = results.every(r => r.code === 0);
+      return send(res, 200, { ok, discovery: { scripts: Object.keys(discovery.scripts || {}), ladder: discovery.ladder }, results });
     }
     return send(res, 400, { error: "unknown tool" });
   }
