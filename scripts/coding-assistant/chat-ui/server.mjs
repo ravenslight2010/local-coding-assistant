@@ -1389,8 +1389,11 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
     if (tool.tool === "shell") {
       if (process.env.CA_ALLOW_SHELL !== "1") return send(res, 403, { error: "shell disabled" });
       const { spawn } = await import("node:child_process");
+      if (res.destroyed) return;
       const isWin = process.platform === "win32";
-      const child = spawn(isWin ? "cmd.exe" : "bash", isWin ? ["/d", "/s", "/c", tool.command] : ["-lc", tool.command], { cwd: root, windowsHide: true });
+      const child = spawn(isWin ? "cmd.exe" : "bash", isWin ? ["/d", "/s", "/c", tool.command] : ["-lc", tool.command], {
+        cwd: root, windowsHide: true, detached: !isWin, stdio: ["ignore", "pipe", "pipe"],
+      });
       let out = "";
       let truncated = false;
       const appendOutput = (chunk) => {
@@ -1402,22 +1405,33 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       child.stdout.on("data", appendOutput);
       child.stderr.on("data", appendOutput);
       let timedOut = false;
+      let cancelled = false;
       let termination = null;
       const terminateProcessTree = () => new Promise((resolve) => {
+        if (!child.pid) return resolve();
         if (!isWin) {
-          child.kill();
+          try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
           resolve();
           return;
         }
-        if (!child.pid) return resolve();
         const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
         killer.once("error", () => {
           child.kill();
           resolve();
         });
-        killer.once("close", resolve);
+        killer.once("close", (code) => {
+          if (code !== 0) child.kill();
+          resolve();
+        });
       });
+      const cancel = () => {
+        if (res.writableEnded || termination) return;
+        cancelled = true;
+        termination = terminateProcessTree();
+      };
+      res.once("close", cancel);
       const timer = setTimeout(() => {
+        if (termination) return;
         timedOut = true;
         termination = terminateProcessTree();
       }, SHELL_TIMEOUT_MS);
@@ -1427,7 +1441,9 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       });
       clearTimeout(timer);
       if (termination) await termination;
-      const audited = recordToolAudit(approval, { outcome: timedOut ? "timeout" : "completed", code, timedOut, truncated });
+      res.off("close", cancel);
+      const audited = recordToolAudit(approval, { outcome: cancelled ? "cancelled" : timedOut ? "timeout" : "completed", code, timedOut, truncated });
+      if (cancelled || res.destroyed) return;
       return send(res, 200, { ok: code === 0 && !timedOut, code, timedOut, truncated, output: out, audited });
     }
     if (tool.tool === "git_status" || tool.tool === "git_pull" || tool.tool === "git_push" || tool.tool === "git_clone" || tool.tool === "git_pr") {
