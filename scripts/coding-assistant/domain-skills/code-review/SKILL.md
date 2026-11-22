@@ -1,18 +1,21 @@
 ---
 name: code-review
-description: Review a diff or file for correctness, safety, and fit.
+description: Review a change before it is called done. Check standards and whether it matches the request.
 ---
 
 # Code review
 
-## Check
-- Does it do what was asked?
-- Are edge cases handled?
-- Are secrets or PII exposed?
-- Is the change larger than needed?
-- Are tests updated?
+Two checks before done.
 
-## Report
-- Blocking issues first
-- Suggestions second
-- What looks fine
+## Standards
+- Does it follow the repo's existing style and patterns?
+- Any secrets, hardcoded credentials, or unsafe input handling?
+- Is the change as small as it can be?
+
+## Spec
+- Does it do what was asked?
+- Are the tests covering the new behavior?
+- Anything asked that is missing?
+
+## Output
+List findings as: file, what is wrong, why it matters. If clean, say so and show the test output.
