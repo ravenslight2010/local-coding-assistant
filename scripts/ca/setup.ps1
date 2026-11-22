@@ -239,7 +239,26 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     'try { Invoke-WebRequest http://127.0.0.1:11434/api/tags -UseBasicParsing -TimeoutSec 2 | Out-Null } catch { Start-Process ollama -ArgumentList serve -WindowStyle Hidden; Start-Sleep 2 }'
     '$server = Join-Path $app ''ui\server.mjs'''
     'if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Write-Error ''Node missing. Run setup again.''; exit 1 }'
-    '$proc = Start-Process node -ArgumentList @($server, ''--port'', "$port", ''--model'', $model) -WorkingDirectory $app -WindowStyle Hidden -PassThru'
+    '# An updated UI may otherwise be served by the old Node process.'
+    '$serverArg = ''(?:^|\s)(?:"'' + [regex]::Escape($server) + ''"|'' + [regex]::Escape($server) + '')(?=\s|$)'''
+    '$listenerIds = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)'
+    'foreach ($listenerId in $listenerIds) {'
+    '  $listener = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerId"'
+    '  if ($listener.Name -ne ''node.exe'' -or $listener.CommandLine -notmatch $serverArg) { throw "Port $port is in use by another program. Code Agent did not stop it." }'
+    '}'
+    'foreach ($listenerId in $listenerIds) {'
+    '  Stop-Process -Id $listenerId'
+    '  Wait-Process -Id $listenerId -Timeout 10 -ErrorAction SilentlyContinue'
+    '}'
+    '$proc = Start-Process node -ArgumentList @("`"$server`"", ''--port'', "$port", ''--model'', $model) -WorkingDirectory $app -WindowStyle Hidden -PassThru'
+    '$deadline = (Get-Date).AddSeconds(15)'
+    'do {'
+    '  if ($proc.HasExited) { throw "Code Agent server exited before it was ready (code $($proc.ExitCode))." }'
+    '  $listening = Get-NetTCPConnection -LocalPort $port -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue'
+    '  if ($listening) { break }'
+    '  Start-Sleep -Milliseconds 250'
+    '} while ((Get-Date) -lt $deadline)'
+    'if (-not $listening) { throw "Code Agent server did not start listening on port $port." }'
     '& (Join-Path $app ''ui\open-app.ps1'') -Port $port'
     'Write-Host "Code Agent model=$model repo=$repo pid=$($proc.Id)"'
   )
@@ -335,6 +354,7 @@ try {
   Verify-Installation $model
   if ($LaunchChat -and -not $NoLaunch) {
     & powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File (Join-Path $AgentRoot "run.ps1")
+    if ($LASTEXITCODE -ne 0) { Fail "Code Agent did not launch successfully." }
   }
   Info "Setup complete. Log: $LogFile"
   exit 0

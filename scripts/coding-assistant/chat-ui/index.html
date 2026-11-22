@@ -1030,6 +1030,9 @@ document.getElementById("searchBadge").onclick = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: document.getElementById("githubRepoUrl").value.trim(), ...(parent ? { parent } : {}) }),
         });
+        if (response.status === 404) {
+          throw new Error("This window is connected to an older Code Agent server. Restart Windows, then reopen Code Agent. If it still happens, run the latest Get-CodeAgent.cmd.");
+        }
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
         await selectRepository(result.root);
