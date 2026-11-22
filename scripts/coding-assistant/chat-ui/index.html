@@ -1414,11 +1414,15 @@ document.getElementById("searchBadge").onclick = () => {
     stopRun.onclick = () => {
       stopRun.disabled = true;
       activeRun?.abort();
+      setTimeout(() => { activeRun = null; stopRun.hidden = true; stopRun.disabled = false; document.getElementById("send").disabled = false; }, 500);
     };
 
 document.getElementById("form").addEventListener("submit", async (ev) => {
       ev.preventDefault();
-      if (activeRun) return;
+      if (activeRun) {
+        if (activeRun._started && Date.now() - activeRun._started > 30000) { activeRun.abort(); activeRun = null; }
+        else return;
+      }
       const input = document.getElementById("input");
       const text = input.value.trim();
       if (!text) return;
@@ -1435,6 +1439,7 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
       const codingMode = true;
       const turnSession = ensureSessionId();
       const controller = new AbortController();
+      controller._started = Date.now();
       activeRun = controller;
       stopRun.hidden = false;
       stopRun.disabled = false;
