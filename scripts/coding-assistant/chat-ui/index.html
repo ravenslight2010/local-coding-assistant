@@ -126,18 +126,26 @@
     <select id="model" aria-label="Model"></select>
     <button id="canvasToggle" type="button" aria-controls="canvasPanel" aria-expanded="false">Canvas</button>
     <button id="newSess" title="New session">New</button>
-    <button id="diag" title="Export diagnostics">Diag</button>
-    <button id="memBtn" title="Project memory">Memory</button>
-    <button id="ctxBtn" title="Import context">Context</button>
-    <button id="expBtn" title="Export session">Export</button>
-    <button id="wfBtn" title="Workflows">Workflows</button>
-    <button id="testBtn" title="Plan tests">Test</button>
-    <button id="nextTask" title="Load next open task">Next task</button>
-    <button id="secBtn" title="Secrets">Secrets</button>
-    <button id="selfBtn" title="Self test">Self-test</button>
-    <button id="installBtn" title="Install the selected app">Install app</button>
-    <button id="memSearch" title="Search memory">Recall</button>
-  </header>
+    <select id="moreMenu" aria-label="More">
+      <option value="">More</option>
+      <option value="diag">Diagnostics</option>
+      <option value="mem">Memory</option>
+      <option value="ctx">Import context</option>
+      <option value="exp">Export session</option>
+      <option value="wf">Workflows</option>
+      <option value="test">Test</option>
+      <option value="sec">Secrets</option>
+      <option value="install">Install app</option>
+    </select>
+    <span class="badge" id="selfBadge" title="Self-test result">checking</span>
+  
+    <div hidden>
+      <button id="diag"></button><button id="memBtn"></button><button id="ctxBtn"></button>
+      <button id="expBtn"></button><button id="wfBtn"></button><button id="testBtn"></button>
+      <button id="nextTask"></button><button id="secBtn"></button><button id="installBtn"></button>
+      <button id="memSearch"></button>
+    </div>
+</header>
   <main>
     <aside>
       <section id="secTasks">
@@ -1467,6 +1475,38 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
         installButton.disabled = false;
       }
     });
+
+
+    document.getElementById("moreMenu").onchange = (e) => {
+      const v = e.target.value;
+      e.target.value = "";
+      const map = { diag: "diag", mem: "memBtn", ctx: "ctxBtn", exp: "expBtn", wf: "wfBtn", test: "testBtn", sec: "secBtn", install: "installBtn" };
+      if (map[v]) document.getElementById(map[v])?.click();
+    };
+    // Auto self-test on load
+    (async () => {
+      try {
+        const r = await fetch("/api/selftest");
+        const j = await r.json();
+        const ok = j.ollama === "up" && j.git === "ok";
+        const b = document.getElementById("selfBadge");
+        b.textContent = ok ? "ready" : "check";
+        b.className = ok ? "badge ok" : "badge";
+        b.title = Object.entries(j).map(([k,v]) => k + ": " + v).join("\n");
+      } catch { document.getElementById("selfBadge").textContent = "offline"; }
+    })();
+    // Auto-load next open task if any
+    (async () => {
+      try {
+        const r = await fetch("/api/tasks");
+        const j = await r.json();
+        const open = (j.tasks || []).filter(t => t.status === "open");
+        if (open.length) {
+          open.sort((a,b) => (a.priority||5) - (b.priority||5));
+          document.getElementById("nextTask")?.click();
+        }
+      } catch {}
+    })();
 
 </script>
 </body>
