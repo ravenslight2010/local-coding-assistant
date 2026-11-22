@@ -318,28 +318,30 @@ function Ensure-TestingStack {
   } else {
     Info "Microsoft Edge not found. Browser tests need Edge or CA_TEST_BROWSER_PATH."
   }
-  if ($InstallTestBrowsers) {
-    $cli = Join-Path $AgentRoot "app/ui/node_modules/playwright-core/cli.js"
-    if (Test-Path -LiteralPath $cli -PathType Leaf) {
-      $node = (Get-Command node -ErrorAction SilentlyContinue).Source
-      if ($node) {
-        $prev = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        foreach ($browser in @("chromium", "firefox", "webkit")) {
-          Info "Downloading Playwright $browser"
-          & $node $cli install $browser 2>&1 | Out-Null
-          if ($LASTEXITCODE -eq 0) { Info "$browser ready" }
-          else { Info "$browser download failed (exit $LASTEXITCODE); continuing" }
-        }
-        $ErrorActionPreference = $prev
-      } else {
-        Info "node not found; skipping browser downloads"
+  $cli = Join-Path $AgentRoot "app/ui/node_modules/playwright-core/cli.js"
+  $node = (Get-Command node -ErrorAction SilentlyContinue).Source
+  if ((Test-Path -LiteralPath $cli -PathType Leaf) -and $node) {
+    $cache = Join-Path $env:USERPROFILE "AppData\Local\ms-playwright"
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    foreach ($browser in @("chromium", "firefox", "webkit")) {
+      $present = $false
+      if (Test-Path -LiteralPath $cache) {
+        $present = [bool](Get-ChildItem -LiteralPath $cache -Directory -ErrorAction SilentlyContinue |
+          Where-Object { $_.Name -like "$browser-*" })
       }
-    } else {
-      Info "Playwright CLI missing; skipping browser downloads"
+      if ($present) {
+        Info "$browser already installed"
+        continue
+      }
+      Info "Downloading Playwright $browser"
+      & $node $cli install $browser 2>&1 | Out-Null
+      if ($LASTEXITCODE -eq 0) { Info "$browser ready" }
+      else { Info "$browser download failed (exit $LASTEXITCODE); continuing" }
     }
+    $ErrorActionPreference = $prev
   } else {
-    Info "Pass /testbrowsers to also download Chromium, Firefox, and WebKit"
+    Info "Playwright CLI or node missing; skipping browser downloads"
   }
 
   if (HasCmd "adb") { Info "Android platform-tools present" }
