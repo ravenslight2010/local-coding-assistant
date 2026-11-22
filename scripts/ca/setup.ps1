@@ -380,9 +380,13 @@ function Ensure-WorkflowTools {
   if (HasCmd "node-red") { Info "Node-RED already installed" }
   else {
     Info "Installing Node-RED"
-    & npm install -g --unsafe-perm node-red 2>&1 | Out-Null
-    if (HasCmd "node-red") { Info "Node-RED ready (run: node-red)" }
-    else { Info "Node-RED install failed; continuing" }
+    try {
+      & npm.cmd install -g node-red
+      if (HasCmd "node-red") { Info "Node-RED ready (run: node-red)" }
+      else { Info "Node-RED install failed; continuing" }
+    } catch {
+      Info "Node-RED skipped: $($_.Exception.Message)"
+    }
   }
   # Docker-based tools
   if (-not (HasCmd "docker")) { Info "Docker not found; skipping Windmill and Activepieces"; return }
@@ -412,9 +416,13 @@ volumes:
   windmill-db:
   activepieces:
 "@ | Set-Content -LiteralPath $compose -Encoding ASCII
-  & docker compose -f $compose up -d 2>&1 | Out-Null
-  if ($LASTEXITCODE -eq 0) { Info "Windmill on :8000, Activepieces on :8080" }
-  else { Info "Docker compose failed; tools not started" }
+  try {
+    & docker compose -f $compose up -d 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { Info "Windmill on :8000, Activepieces on :8080" }
+    else { Info "Docker compose failed; tools not started" }
+  } catch {
+    Info "Workflow containers skipped: $($_.Exception.Message)"
+  }
 }
 
 try {
