@@ -1159,6 +1159,12 @@ async function handleRequest(req, res) {
     saveSession(sess);
     return send(res, 200, sess);
   }
+  if (req.method === "DELETE" && url.pathname === "/api/session") {
+    const id = url.searchParams.get("id");
+    const file = sessionFile(id);
+    if (file && existsSync(file)) unlinkSync(file);
+    return send(res, 200, { ok: true });
+  }
   if (req.method === "GET" && url.pathname === "/api/session") {
     const s = loadSession(url.searchParams.get("id") || "");
     if (!s) return send(res, 404, { error: "not found" });

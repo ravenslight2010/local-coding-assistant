@@ -733,11 +733,26 @@
       const d = await r.json();
       sessionsEl.innerHTML = "";
       for (const s of d.sessions || []) {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:4px;align-items:center";
         const b = document.createElement("button");
         b.className = "sess" + (s.id === sessionId ? " active" : "");
-        b.textContent = (s.title || s.id).slice(0, 28);
+        b.textContent = (s.title || s.id).slice(0, 24);
+        b.style.flex = "1";
         b.onclick = () => loadSession(s.id);
-        sessionsEl.appendChild(b);
+        const del = document.createElement("button");
+        del.textContent = "x";
+        del.title = "Delete session";
+        del.style.cssText = "padding:2px 6px;opacity:0.6";
+        del.onclick = async (e) => {
+          e.stopPropagation();
+          if (!confirm("Delete this session?")) return;
+          await fetch("/api/session?id=" + s.id, { method: "DELETE" });
+          if (s.id === sessionId) { sessionId = null; localStorage.removeItem("ca_session"); log.innerHTML = ""; messages = []; }
+          loadSessions();
+        };
+        row.appendChild(b); row.appendChild(del);
+        sessionsEl.appendChild(row);
       }
     }
     async function loadSession(id) {
