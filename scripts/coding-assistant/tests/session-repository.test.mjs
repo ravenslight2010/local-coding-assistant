@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,6 +17,7 @@ const secondRepo = path.join(tempRoot, "second");
 const agentRoot = path.join(tempRoot, "agent");
 const prompts = [];
 const assistantResponses = [];
+let testStreamClosed = false;
 let serverProcess;
 let upstream;
 let baseUrl;
@@ -59,7 +60,13 @@ before(async () => {
       const content = assistantResponses.shift() || "ok";
       if (body.stream) {
         res.setHeader("Content-Type", "text/event-stream");
-        res.end(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: [DONE]\n\n`);
+        if (content.hold) {
+          testStreamClosed = false;
+          res.once("close", () => { testStreamClosed = true; });
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: content.hold } }] })}\n\n`);
+        } else {
+          res.end(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: [DONE]\n\n`);
+        }
         return;
       }
       res.end(JSON.stringify({ choices: [{ message: { content } }] }));
@@ -72,7 +79,7 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${port}`;
   serverProcess = spawn(process.execPath, [serverScript, "--port", String(port), "--ollama", upstreamUrl], {
     cwd: sourceRepo,
-    env: { ...process.env, RUNCALC_REPO: firstRepo, CA_AGENT_ROOT: agentRoot },
+    env: { ...process.env, RUNCALC_REPO: firstRepo, CA_AGENT_ROOT: agentRoot, CA_ALLOW_SHELL: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   serverProcess.stdout.setEncoding("utf8").on("data", (data) => { serverOutput += data; });
@@ -287,6 +294,56 @@ test("Browse opens inside the app and selects a repository at desktop and phone 
   }
 });
 
+test("creating a session with an unavailable repository does not fall back to the default", async () => {
+  const response = await post("/api/sessions", { id: "unavailable-repo", repo: path.join(tempRoot, "missing") });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /selected repository is unavailable/);
+  assert.equal((await fetch(baseUrl + "/api/session?id=unavailable-repo")).status, 404);
+});
+
+test("New keeps the selected repository for planning and running tests", {
+  timeout: 25_000,
+  skip: process.platform !== "win32" && !process.env.CA_TEST_BROWSER_PATH,
+}, async () => {
+  writeFileSync(path.join(secondRepo, "package.json"), JSON.stringify({ scripts: { test: "node repo-check.cjs" } }));
+  writeFileSync(path.join(secondRepo, "repo-check.cjs"), `console.log("Ran tests in: " + process.cwd());\n`);
+  assert.equal((await post("/api/repo", { sessionId: "keep-repo", path: secondRepo })).status, 200);
+  assistantResponses.push('```tool\n{"tool":"shell","command":"npm test"}\n```', "Tests finished.");
+  const runtime = path.join(sourceRepo, "scripts/coding-assistant/chat-ui/package.json");
+  const { chromium } = createRequire(runtime)("playwright-core");
+  const browser = await chromium.launch(process.env.CA_TEST_BROWSER_PATH
+    ? { executablePath: process.env.CA_TEST_BROWSER_PATH }
+    : { channel: "msedge" });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      if (!localStorage.getItem("ca_session")) localStorage.setItem("ca_session", "keep-repo");
+    });
+    await page.goto(baseUrl);
+    page.setDefaultTimeout(8000);
+    await page.getByRole("button", { name: /repo-check.cjs/ }).waitFor();
+    await page.getByRole("button", { name: "New", exact: true }).click();
+    const root = realpathSync.native(secondRepo);
+    await page.getByText("New session. Session repository: " + root, { exact: true }).waitFor();
+    const newSession = await page.evaluate(() => localStorage.getItem("ca_session"));
+    assert.notEqual(newSession, "keep-repo");
+    await page.reload();
+    await page.getByRole("button", { name: /repo-check.cjs/ }).waitFor();
+    assert.equal(await page.locator("#repoPath").inputValue(), root);
+    page.once("dialog", (dialog) => dialog.accept(""));
+    await page.getByRole("button", { name: "Test", exact: true }).click();
+    await page.getByText("Test plan for " + root + ":", { exact: false }).waitFor();
+    assert.match(await page.locator("#input").inputValue(), /unit: node repo-check\.cjs/);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.getByRole("button", { name: "Allow", exact: true }).click();
+    await page.getByText("Tests finished.", { exact: true }).waitFor();
+    const applied = await page.getByText(/^Applied: /).innerText();
+    assert.ok(JSON.parse(applied.slice("Applied: ".length)).output.includes("Ran tests in: " + root));
+  } finally {
+    await browser.close();
+  }
+});
+
 test("Code loop verifies the selected repository and retries an access refusal", {
   timeout: 20_000,
   skip: process.platform !== "win32" && !process.env.CA_TEST_BROWSER_PATH,
@@ -330,6 +387,74 @@ test("Code loop verifies the selected repository and retries an access refusal",
     assert.match(resultPrompt.messages.at(-1).content, /node --test/);
     assert.doesNotMatch(JSON.stringify(resultPrompt), /Code Agent verified that the selected local repository is accessible/);
     await page.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Stop interrupts generation, withdraws pending approval, and stops an approved command", {
+  timeout: 35_000,
+  skip: process.platform !== "win32" && !process.env.CA_TEST_BROWSER_PATH,
+}, async () => {
+  const root = path.join(tempRoot, "stop-test");
+  mkdirSync(root);
+  writeFileSync(path.join(root, "package.json"), "{}");
+  writeFileSync(path.join(root, "stop-fixture.cjs"), `
+    const fs = require("node:fs");
+    fs.writeFileSync("started.txt", "");
+    setTimeout(() => fs.writeFileSync("finished.txt", ""), 4000);
+  `);
+  assert.equal((await post("/api/repo", { sessionId: "stop-session", path: root })).status, 200);
+  const runtime = path.join(sourceRepo, "scripts/coding-assistant/chat-ui/package.json");
+  const { chromium } = createRequire(runtime)("playwright-core");
+  const browser = await chromium.launch(process.env.CA_TEST_BROWSER_PATH
+    ? { executablePath: process.env.CA_TEST_BROWSER_PATH }
+    : { channel: "msedge" });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => localStorage.setItem("ca_session", "stop-session"));
+    await page.goto(baseUrl);
+    page.setDefaultTimeout(7000);
+    await page.getByRole("button", { name: /stop-fixture/ }).waitFor();
+    const send = page.getByRole("button", { name: "Send", exact: true });
+    const stop = page.getByRole("button", { name: "Stop", exact: true });
+    const input = page.getByRole("textbox", { name: "Message" });
+    const sendMessage = async () => {
+      await input.fill("Try the fixture");
+      await send.click();
+    };
+    const waitUntil = async (ready) => {
+      const deadline = Date.now() + 6000;
+      while (!ready() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(ready(), true);
+    };
+    const shell = '```tool\n{"tool":"shell","command":"node stop-fixture.cjs"}\n```';
+    assistantResponses.push({ hold: "Partial response" }, shell, shell, "Ready for another request.");
+    await sendMessage();
+    await page.getByText("Partial response", { exact: true }).waitFor();
+    await stop.click();
+    await stop.waitFor({ state: "hidden" });
+    await waitUntil(() => testStreamClosed);
+    await page.getByText(/\[Stopped\]/).waitFor();
+
+    await sendMessage();
+    const allow = page.getByRole("button", { name: "Allow", exact: true });
+    await allow.waitFor();
+    await stop.click();
+    await allow.waitFor({ state: "hidden" });
+    assert.equal(existsSync(path.join(root, "started.txt")), false);
+
+    await sendMessage();
+    await allow.click();
+    await waitUntil(() => existsSync(path.join(root, "started.txt")));
+    await stop.click();
+    await stop.waitFor({ state: "hidden" });
+    const audit = path.join(agentRoot, "audit", "tool-actions.json");
+    await waitUntil(() => JSON.parse(readFileSync(audit, "utf8")).some((r) => r.sessionId === "stop-session" && r.outcome === "cancelled"));
+    await sendMessage();
+    await page.getByText("Ready for another request.", { exact: true }).waitFor();
+    await new Promise((resolve) => setTimeout(resolve, 4100));
+    assert.equal(existsSync(path.join(root, "finished.txt")), false);
   } finally {
     await browser.close();
   }

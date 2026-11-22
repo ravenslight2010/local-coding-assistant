@@ -13,6 +13,8 @@ A local coding assistant that runs on your machine with Ollama. Inference requir
 ## Coding loop
 Turn on **Code loop** to let the assistant search and read relevant repository files, propose focused edits, then use approved command and Git results to continue. Repository reads are bounded and skip dependency/build folders and credential-like files. Create/edit/patch tools can auto-apply only when **Auto** is enabled; shell and every Git tool require explicit approval. Shell is on by default (`CA_ALLOW_SHELL=1` in the generated run script). Git tools include status, pull, push, clone, and pull-request creation; `GITHUB_TOKEN` is read from Secrets for GitHub HTTPS pull/push and PR creation. Edit approvals are bound to the prepared session, repository, and file SHA-256; stale approvals return `409` without overwriting newer content. Approved edits use atomic replacement. Up to 200 outcome-only edit/command audit records are kept in `agent/audit/tool-actions.json`; source changes and command text are not recorded. Chat streaming honors client disconnects and response backpressure.
 
+Click **Stop** beside **Send** to interrupt a reply or stop Code loop during a run. It dismisses pending approvals and stops active shell commands started by the loop. Already-approved file and Git actions can finish, and Stop does not undo changes.
+
 ## Canvas preview and browser check
 Open **Canvas** to preview an app at `http://127.0.0.1:<port>` in desktop, tablet, or phone width. **Check page** opens it in a fresh headless browser, captures a screenshot, and reports HTTP status, title, JavaScript console errors, and uncaught page errors. The browser has no saved cookies; it blocks cross-origin and non-GET/HEAD requests, limits a check to 100 requests and one active run, and does not click or automate controls. Windows uses installed Microsoft Edge; on other systems set `CA_TEST_BROWSER_PATH` to a Chromium-based browser executable.
 
@@ -55,7 +57,7 @@ Use **Repo → Browse** to navigate local folders. **Jump to a location** lists 
 
 If the repository is still on GitHub, choose **Repo → Browse → Clone from GitHub**, paste its HTTPS repository URL, and click **Clone and open**. Leave **Save inside folder** blank to use Code Agent's `repositories` folder, or enter an absolute destination path. Code Agent creates the missing destination and repository folders. If the named folder already contains a checkout of the same GitHub repository, Code Agent opens it without modifying it; a different existing folder is left untouched. New clones are shallow. Public repositories need only Git and internet access; private repositories also require Code Agent's existing GitHub token configuration with read access.
 
-The selected path is saved with the session and restored when it is reopened. Set `RUNCALC_REPO` when launching the server to choose the default for new sessions.
+The selected path is saved with the session and restored when it is reopened. **New** starts a fresh chat in the currently selected repository. **Test** shows which repository the plan was built for. Set `RUNCALC_REPO` when launching the server to choose the default before a repository has been selected.
 
 Repository path checks are segment-aware: `.github` and filenames containing `..` are allowed, while traversal and `.git` metadata are blocked. Credential-like files are excluded from the file browser, coding reads/search, selected chat context, and edits.
 

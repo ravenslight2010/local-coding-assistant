@@ -179,6 +179,7 @@
       <form id="form">
         <textarea id="input" aria-label="Message" placeholder="Ask, /search …, or propose a change…" rows="2"></textarea>
         <button type="submit" class="primary" id="send">Send</button>
+        <button type="button" class="warn" id="stopRun" hidden>Stop</button>
       </form>
     </section>
     <section id="canvasPanel" class="canvas-panel" data-size="desktop" aria-labelledby="canvasHeading" hidden>
@@ -277,6 +278,7 @@
     let currentRepo = "";
     let includeContext = false;
     let estimateSequence = 0;
+    let activeRun = null;
 
     function ensureSessionId() {
       if (!sessionId) sessionId = Math.random().toString(36).slice(2, 10);
@@ -351,10 +353,10 @@
       return "";
     }
 
-    function addToolCard(toolObj, waitForDecision = false) {
+    function addToolCard(toolObj, signal) {
       const approvalSessionId = ensureSessionId();
       let resolveDecision;
-      const decision = waitForDecision ? new Promise((resolve) => { resolveDecision = resolve; }) : null;
+      const decision = signal ? new Promise((resolve) => { resolveDecision = resolve; }) : null;
       const card = document.createElement("div");
       card.className = "tool-card";
       card.setAttribute("aria-label", "Approval required for " + String(toolObj.tool || "tool"));
@@ -382,31 +384,51 @@
       deny.className = "warn";
       deny.textContent = "Deny";
       let approvalId = null;
+      let applying = false;
+      const settle = (result) => {
+        signal?.removeEventListener("abort", stop);
+        resolveDecision?.(result);
+      };
+      function stop() {
+        if (applying && toolObj.tool !== "shell") {
+          status.textContent = "Stopping after the approved action finishes…";
+          return;
+        }
+        card.remove();
+        settle({ approved: false });
+      }
+      signal?.addEventListener("abort", stop, { once: true });
       allow.onclick = async () => {
+        if (signal?.aborted || applying) return;
+        applying = true;
         allow.disabled = true;
+        deny.disabled = true;
+        status.textContent = "Running approved action…";
         try {
-          const r = await fetch("/api/tool/apply", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ approvalId, sessionId: approvalSessionId }) });
+          const r = await fetch("/api/tool/apply", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ approvalId, sessionId: approvalSessionId }), signal: toolObj.tool === "shell" ? signal : undefined });
           const d = await r.json();
           addMsg("system", r.ok ? "Applied: " + JSON.stringify(d) : "Failed: " + (d.error || ""));
           card.remove();
-          if (resolveDecision) resolveDecision({ approved: r.ok, body: d });
+          settle({ approved: r.ok, body: d });
         } catch (e) {
+          if (signal?.aborted && toolObj.tool === "shell") return;
           status.textContent = "Approval failed: " + e.message;
-          if (resolveDecision) resolveDecision({ approved: false, error: e.message });
+          settle({ approved: false, error: e.message });
         }
       };
       deny.onclick = () => {
         addMsg("system", "Denied");
         card.remove();
-        if (resolveDecision) resolveDecision({ approved: false, denied: true });
+        settle({ approved: false, denied: true });
       };
       row.appendChild(allow); row.appendChild(deny);
       card.appendChild(row);
       log.appendChild(card);
       log.scrollTop = log.scrollHeight;
-      fetch("/api/tool/prepare", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ tool: toolObj, sessionId: approvalSessionId }) })
+      fetch("/api/tool/prepare", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ tool: toolObj, sessionId: approvalSessionId }), signal })
         .then(async (r) => {
           const data = await r.json();
+          if (signal?.aborted) return;
           if (!r.ok) throw new Error(data.error || "tool request rejected");
           approvalId = data.approvalId;
           allow.disabled = false;
@@ -423,8 +445,9 @@
               : "Review this tool action, then allow or deny.";
         })
         .catch((e) => {
+          if (signal?.aborted) return;
           status.textContent = "Cannot approve: " + e.message;
-          if (resolveDecision) resolveDecision({ approved: false, error: e.message });
+          settle({ approved: false, error: e.message });
         });
       return decision;
     }
@@ -443,12 +466,13 @@
       return /\b(?:i\s+(?:can(?:not|'t)|do\s+not)\s+(?:access|inspect|read|modify)|i\s+don't\s+have\s+(?:access|the\s+ability\s+to\s+access))\b[\s\S]{0,180}\b(?:files?|computer|repository|repo|directories)\b/i.test(text);
     }
 
-    async function requestAssistantTurn(codingMode, repositoryContext) {
+    async function requestAssistantTurn(codingMode, signal, repositoryContext) {
       const turnSession = ensureSessionId();
       const assistantEl = addMsg("assistant", "");
       let full = "";
       try {
         const r = await fetch("/api/chat", {
+          signal,
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -472,9 +496,18 @@
           assistantEl.textContent = full;
           log.scrollTop = log.scrollHeight;
         });
+        signal.throwIfAborted();
         if (turnSession === sessionId) messages.push({ role: "assistant", content: full });
         return { full, tools: extractTools(full) };
       } catch (e) {
+        if (signal.aborted) {
+          if (!full) assistantEl.remove();
+          else {
+            assistantEl.textContent = full + "\n\n[Stopped]";
+            if (turnSession === sessionId) messages.push({ role: "assistant", content: assistantEl.textContent });
+          }
+          throw e;
+        }
         assistantEl.textContent = full ? full + "\n\n[Stream interrupted: " + e.message + "]" : "Error: " + e.message;
         if (turnSession === sessionId) {
           if (full) messages.push({ role: "assistant", content: assistantEl.textContent });
@@ -484,7 +517,7 @@
       }
     }
 
-    async function runCodingLoop() {
+    async function runCodingLoop(signal) {
       const maxToolSteps = 8;
       const maxToolOutputChars = 24000;
       const maxSingleResultChars = 12000;
@@ -494,8 +527,8 @@
       const turnRepo = currentRepo;
       let steps = 0;
       let toolOutputChars = 0;
-      while (true) {
-        const { full, tools } = await requestAssistantTurn(true, repositoryContext);
+      while (!signal.aborted) {
+        const { full, tools } = await requestAssistantTurn(true, signal, repositoryContext);
         repositoryContext = undefined;
         if (turnSession !== sessionId || turnRepo !== currentRepo) return;
         if (!tools.length && deniesLocalRepositoryAccess(full)) {
@@ -506,8 +539,8 @@
           repositoryAccessRecoveryUsed = true;
           try {
             const [treeResponse, testResponse] = await Promise.all([
-              fetch(sessionUrl("/api/tree")),
-              fetch(sessionUrl("/api/test/discover")),
+              fetch(sessionUrl("/api/tree"), { signal }),
+              fetch(sessionUrl("/api/test/discover"), { signal }),
             ]);
             if (!treeResponse.ok || !testResponse.ok) throw new Error("Could not verify the selected repository");
             const [tree, tests] = await Promise.all([treeResponse.json(), testResponse.json()]);
@@ -519,6 +552,7 @@
               JSON.stringify({ "Top-level repository entries": files, "Discovered test/check script names": scripts });
             continue;
           } catch (error) {
+            if (signal.aborted) return;
             addMsg("system", `Code Agent could not recover repository context: ${error.message}`);
           }
         }
@@ -553,11 +587,13 @@
 
         if (tool.tool === "read" || tool.tool === "search") {
           const r = await fetch("/api/tool/read", {
+            signal,
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ tool, sessionId: ensureSessionId() }),
           });
           const result = await r.json();
+          if (signal.aborted) return;
           addMsg("system", r.ok ? `Repository ${tool.tool} complete.` : `Repository ${tool.tool} failed: ${result.error || r.status}`);
           const output = JSON.stringify(result);
           const clippedOutput = output.slice(0, Math.min(maxSingleResultChars, maxToolOutputChars - toolOutputChars));
@@ -575,8 +611,8 @@
           return;
         }
 
-        const result = await addToolCard(tool, true);
-        if (!result?.approved) return;
+        const result = await addToolCard(tool, signal);
+        if (signal.aborted || !result?.approved) return;
         const output = JSON.stringify(result.body);
         const clippedOutput = output.slice(0, Math.min(maxSingleResultChars, maxToolOutputChars - toolOutputChars));
         toolOutputChars += clippedOutput.length;
@@ -793,15 +829,21 @@
     };
 document.getElementById("testBtn").onclick = async () => {
       const hint = prompt("What changed? (ui, import, api, or leave blank)") || "";
+      const testSession = sessionId;
       const r = await fetch("/api/test/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, hint }),
+        body: JSON.stringify({ sessionId: testSession, hint }),
       });
       const d = await r.json();
+      if (testSession !== sessionId) return;
+      if (!r.ok) {
+        addMsg("system", "Could not load tests: " + d.error);
+        return;
+      }
       const lines = (d.plan || []).map((s) => s.step + ": " + s.cmd).join("\n") || "No tests discovered";
-      document.getElementById("input").value = "Run this test plan and report results:\n" + lines;
-      addMsg("system", "Test plan loaded.\n" + lines);
+      document.getElementById("input").value = "Run this test plan from the selected repository and report results:\n" + lines;
+      addMsg("system", "Test plan for " + currentRepo + ":\n" + lines);
     };
 document.getElementById("wfBtn").onclick = async () => {
       const r = await fetch("/api/workflows");
@@ -915,12 +957,24 @@ document.getElementById("searchBadge").onclick = () => {
       b.className = searchEnabled ? "badge ok" : "badge";
     };
 
-    document.getElementById("newSess").onclick = async () => {
-      sessionId = null; messages = []; contextFiles.clear(); includeContext = false; document.getElementById("contextPack").checked = false; log.innerHTML = "";
-      addMsg("system", "New session. Local Ollama; prompt context is bounded by the active model.");
-      await saveSession();
-      await Promise.all([health(), loadTree(""), loadSkills()]);
-      refreshCtx();
+    document.getElementById("newSess").onclick = async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const r = await fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: "New session", repo: currentRepo || undefined }),
+        });
+        const session = await r.json();
+        if (!r.ok) throw new Error(session.error);
+        await loadSession(session.id);
+        addMsg("system", "New session. Session repository: " + currentRepo);
+      } catch (error) {
+        addMsg("system", "Could not start a new session: " + error.message);
+      } finally {
+        button.disabled = false;
+      }
     };
 
     async function selectRepository(selected) {
@@ -1304,8 +1358,15 @@ document.getElementById("searchBadge").onclick = () => {
       }
     });
 
+    const stopRun = document.getElementById("stopRun");
+    stopRun.onclick = () => {
+      stopRun.disabled = true;
+      activeRun?.abort();
+    };
+
 document.getElementById("form").addEventListener("submit", async (ev) => {
       ev.preventDefault();
+      if (activeRun) return;
       const input = document.getElementById("input");
       const text = input.value.trim();
       if (!text) return;
@@ -1321,25 +1382,39 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
       const send = document.getElementById("send");
       const codingToggle = document.getElementById("codingMode");
       const codingMode = codingToggle.checked;
+      const turnSession = ensureSessionId();
+      const controller = new AbortController();
+      activeRun = controller;
+      stopRun.hidden = false;
+      stopRun.disabled = false;
       send.disabled = true;
       codingToggle.disabled = true;
       try {
         if (codingMode) {
-          await runCodingLoop();
+          await runCodingLoop(controller.signal);
         } else {
-          const { tools } = await requestAssistantTurn(false);
+          const { tools } = await requestAssistantTurn(false, controller.signal);
+          controller.signal.throwIfAborted();
           for (const t of tools) {
             if (t.tool === "read" || t.tool === "search") addMsg("system", "Enable Code loop to use repository read/search tools.");
             else addToolCard(t);
           }
         }
-        await saveSession();
-        refreshCtx();
       } catch (e) {
-        addMsg("system", "Coding request stopped: " + e.message);
+        if (!controller.signal.aborted) addMsg("system", "Coding request stopped: " + e.message);
       } finally {
+        if (controller.signal.aborted) {
+          addMsg("system", "Stopped. Changes already made were not undone.");
+          input.focus();
+        }
+        activeRun = null;
+        stopRun.hidden = true;
         send.disabled = false;
         codingToggle.disabled = false;
+        if (turnSession === sessionId) {
+          await saveSession();
+          refreshCtx();
+        }
       }
     });
 
