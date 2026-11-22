@@ -1097,8 +1097,9 @@ async function handleRequest(req, res) {
     if (body.messages) sess.messages = body.messages;
     if (body.title) sess.title = body.title;
     if (body.includeContext !== undefined) sess.includeContext = body.includeContext === true;
-    if (body.repo) {
-      try { sess.repo = canonicalRepositoryRoot(body.repo); } catch {}
+    if (body.repo !== undefined) {
+      try { sess.repo = canonicalRepositoryRoot(body.repo); }
+      catch { return send(res, 400, { error: "selected repository is unavailable or invalid" }); }
     }
     const since = sess.updated || Date.now() - 7 * 86400000;
     sess.changedSince = changedSince(sess.repo || DEFAULT_ROOT, since);

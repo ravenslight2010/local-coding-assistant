@@ -294,6 +294,56 @@ test("Browse opens inside the app and selects a repository at desktop and phone 
   }
 });
 
+test("creating a session with an unavailable repository does not fall back to the default", async () => {
+  const response = await post("/api/sessions", { id: "unavailable-repo", repo: path.join(tempRoot, "missing") });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /selected repository is unavailable/);
+  assert.equal((await fetch(baseUrl + "/api/session?id=unavailable-repo")).status, 404);
+});
+
+test("New keeps the selected repository for planning and running tests", {
+  timeout: 25_000,
+  skip: process.platform !== "win32" && !process.env.CA_TEST_BROWSER_PATH,
+}, async () => {
+  writeFileSync(path.join(secondRepo, "package.json"), JSON.stringify({ scripts: { test: "node repo-check.cjs" } }));
+  writeFileSync(path.join(secondRepo, "repo-check.cjs"), `console.log("Ran tests in: " + process.cwd());\n`);
+  assert.equal((await post("/api/repo", { sessionId: "keep-repo", path: secondRepo })).status, 200);
+  assistantResponses.push('```tool\n{"tool":"shell","command":"npm test"}\n```', "Tests finished.");
+  const runtime = path.join(sourceRepo, "scripts/coding-assistant/chat-ui/package.json");
+  const { chromium } = createRequire(runtime)("playwright-core");
+  const browser = await chromium.launch(process.env.CA_TEST_BROWSER_PATH
+    ? { executablePath: process.env.CA_TEST_BROWSER_PATH }
+    : { channel: "msedge" });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      if (!localStorage.getItem("ca_session")) localStorage.setItem("ca_session", "keep-repo");
+    });
+    await page.goto(baseUrl);
+    page.setDefaultTimeout(8000);
+    await page.getByRole("button", { name: /repo-check.cjs/ }).waitFor();
+    await page.getByRole("button", { name: "New", exact: true }).click();
+    const root = realpathSync.native(secondRepo);
+    await page.getByText("New session. Session repository: " + root, { exact: true }).waitFor();
+    const newSession = await page.evaluate(() => localStorage.getItem("ca_session"));
+    assert.notEqual(newSession, "keep-repo");
+    await page.reload();
+    await page.getByRole("button", { name: /repo-check.cjs/ }).waitFor();
+    assert.equal(await page.locator("#repoPath").inputValue(), root);
+    page.once("dialog", (dialog) => dialog.accept(""));
+    await page.getByRole("button", { name: "Test", exact: true }).click();
+    await page.getByText("Test plan for " + root + ":", { exact: false }).waitFor();
+    assert.match(await page.locator("#input").inputValue(), /unit: node repo-check\.cjs/);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.getByRole("button", { name: "Allow", exact: true }).click();
+    await page.getByText("Tests finished.", { exact: true }).waitFor();
+    const applied = await page.getByText(/^Applied: /).innerText();
+    assert.ok(JSON.parse(applied.slice("Applied: ".length)).output.includes("Ran tests in: " + root));
+  } finally {
+    await browser.close();
+  }
+});
+
 test("Code loop verifies the selected repository and retries an access refusal", {
   timeout: 20_000,
   skip: process.platform !== "win32" && !process.env.CA_TEST_BROWSER_PATH,

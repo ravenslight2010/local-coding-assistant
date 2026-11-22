@@ -57,7 +57,7 @@ Use **Repo → Browse** to navigate local folders. **Jump to a location** lists 
 
 If the repository is still on GitHub, choose **Repo → Browse → Clone from GitHub**, paste its HTTPS repository URL, and click **Clone and open**. Leave **Save inside folder** blank to use Code Agent's `repositories` folder, or enter an absolute destination path. Code Agent creates the missing destination and repository folders. If the named folder already contains a checkout of the same GitHub repository, Code Agent opens it without modifying it; a different existing folder is left untouched. New clones are shallow. Public repositories need only Git and internet access; private repositories also require Code Agent's existing GitHub token configuration with read access.
 
-The selected path is saved with the session and restored when it is reopened. Set `RUNCALC_REPO` when launching the server to choose the default for new sessions.
+The selected path is saved with the session and restored when it is reopened. **New** starts a fresh chat in the currently selected repository. **Test** shows which repository the plan was built for. Set `RUNCALC_REPO` when launching the server to choose the default before a repository has been selected.
 
 Repository path checks are segment-aware: `.github` and filenames containing `..` are allowed, while traversal and `.git` metadata are blocked. Credential-like files are excluded from the file browser, coding reads/search, selected chat context, and edits.
 
