@@ -349,7 +349,7 @@ try {
   $model = Select-Model
   Ensure-Model $model
   Copy-App $repo $model
-  if ($InstallTestBrowsers) { Ensure-TestingStack }
+  Ensure-TestingStack
   Create-Shortcuts
   Verify-Installation $model
   if ($LaunchChat -and -not $NoLaunch) {
