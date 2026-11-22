@@ -3,10 +3,10 @@
 ## Current pin
 `Get-CodeAgent.cmd` installs immutable source:
 
-- Commit: `8a08e1ccbf46a90e1ea4b9bf5827426fea51d07e`
-- Archive SHA-256: `efad37c0126fa5acbb528986f28406b8080cdf265c65e8e90b5f03705c944c95`
+- Commit: `090d32fd2b3fac586ced143fdc467d3e2392405d`
+- Archive SHA-256: `cc6d3d6b7120a517a625c0c09f3866a356849f2112d75a1703e81672b81d78fa`
 
-This pin includes a Windows launcher that replaces the old Code Agent server after an update, along with GitHub cloning into a chosen folder.
+This pin includes a Code loop retry when the model incorrectly denies file access, along with the Windows launcher and GitHub clone fixes.
 
 ## How to run
 Double-click `Get-CodeAgent.cmd`. It requests Administrator, verifies the zip, then runs setup.
