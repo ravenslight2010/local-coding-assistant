@@ -321,6 +321,8 @@ test("New keeps the selected repository for planning and running tests", {
     });
     await page.goto(baseUrl);
     page.setDefaultTimeout(8000);
+    assert.equal(await page.getByRole("checkbox", { name: "Auto", exact: true }).isChecked(), false);
+    assert.equal(await page.getByRole("checkbox", { name: "Pack", exact: true }).isChecked(), false);
     await page.getByRole("button", { name: /repo-check.cjs/ }).waitFor();
     await page.getByRole("button", { name: "New", exact: true }).click();
     const root = realpathSync.native(secondRepo);
@@ -331,7 +333,7 @@ test("New keeps the selected repository for planning and running tests", {
     await page.getByRole("button", { name: /repo-check.cjs/ }).waitFor();
     assert.equal(await page.locator("#repoPath").inputValue(), root);
     page.once("dialog", (dialog) => dialog.accept(""));
-    await page.getByRole("button", { name: "Test", exact: true }).click();
+    await page.getByRole("combobox", { name: "More" }).selectOption("test");
     await page.getByText("Test plan for " + root + ":", { exact: false }).waitFor();
     assert.match(await page.locator("#input").inputValue(), /unit: node repo-check\.cjs/);
     await page.getByRole("button", { name: "Send", exact: true }).click();

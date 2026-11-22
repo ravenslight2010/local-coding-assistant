@@ -229,13 +229,10 @@ Write tools (approval required):
 \`\`\`tool
 {"tool":"patch","files":[{"path":"a","old":"...","new":"..."},{"path":"b","content":"new file"}]}
 \`\`\`
-Test tool (ALWAYS use this when asked to test. Do NOT use shell with npm test. Do NOT cd anywhere.):
+When asked to test, read the selected repository's test configuration first. If it defines an npm test script, propose an approved shell tool with npm test. Shell commands already start in the selected repository; don't add a cd command.
 \`\`\`tool
-{"tool":"test","hint":"what changed"}
-{"tool":"lint"}
-{"tool":"typecheck"}
+{"tool":"shell","command":"npm test"}
 \`\`\`
-It discovers the repo's real scripts and runs the ladder. Never run npm test unless the discovery says a test script exists.
 
 Inspect before editing. Prefer the smallest complete patch. If Auto is on, file tools apply without a prompt and you should continue to the next step (read result, edit, test) until done or blocked. Do not create a follow-up task. If more work belongs with the current task, say so and ask to include it in the current task. Update the covering test in the same change. One tool block per response. Never claim a test passed without its output. Do not read secret files.`;
 
@@ -1161,10 +1158,11 @@ async function handleRequest(req, res) {
     saveSession(sess);
     return send(res, 200, sess);
   }
-  if (req.method === "DELETE" && url.pathname === "/api/session") {
-    const id = url.searchParams.get("id");
+  if (req.method === "POST" && url.pathname === "/api/session/delete") {
+    const { id } = JSON.parse(await readBody(req) || "{}");
     const file = sessionFile(id);
-    if (file && existsSync(file)) unlinkSync(file);
+    if (!file || !existsSync(file)) return send(res, 404, { error: "session not found" });
+    unlinkSync(file);
     return send(res, 200, { ok: true });
   }
   if (req.method === "GET" && url.pathname === "/api/session") {
@@ -1451,7 +1449,7 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
     if (tool.tool === "shell") {
       if (process.env.CA_ALLOW_SHELL !== "1") return send(res, 403, { error: "shell disabled" });
       const cdMatch = tool.command.match(/\bcd\s+(\/|\w:)/i);
-      if (cdMatch) return send(res, 400, { error: "shell stays in the selected repo; do not cd to an absolute path. Use the test tool for tests." });
+      if (cdMatch) return send(res, 400, { error: "Shell commands start in the selected repository. Remove the absolute cd command." });
       const { spawn } = await import("node:child_process");
       if (res.destroyed) return;
       const isWin = process.platform === "win32";

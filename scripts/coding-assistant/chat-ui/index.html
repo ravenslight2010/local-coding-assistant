@@ -30,7 +30,7 @@
     .file.active,.skill-btn.active { background:var(--panel-2); outline:1px solid var(--accent); }
     .chat { display:flex; flex-direction:column; min-height:0; position:relative; }
     #log { flex:1; overflow:auto; padding:0.9rem 1rem; display:flex; flex-direction:column; gap:0.55rem; }
-    .msg-time { float: right; opacity: 0.5; font-size: 0.75em; margin-left: 8px; }
+    .msg[data-time]::before { content: attr(data-time); float: right; opacity: 0.7; font-size: 0.75em; margin-left: 8px; }
     .msg { max-width:900px; padding:0.65rem 0.9rem; border-radius:12px; line-height:1.45; font-size:0.93rem; white-space:pre-wrap; word-break:break-word; position:relative; }
     .msg.user { background:var(--user); align-self:flex-end; border-bottom-right-radius:4px; }
     .msg.assistant { background:var(--assistant); align-self:flex-start; border-bottom-left-radius:4px; }
@@ -119,11 +119,12 @@
   <header>
     <h1>Code Agent</h1>
     <span class="badge" id="mode">local</span>
-    <span class="badge" id="searchBadge">search: on</span>
+    <span class="badge" id="searchBadge">search: off</span>
     <span class="badge" id="ollama">ollama: …</span>
     <span class="badge" id="modelBadge">model</span>
-    <span class="badge">code</span>
-    <span class="badge">auto</span>
+    <label class="coding-toggle"><input id="codingMode" type="checkbox" checked /> Code loop</label>
+    <label class="coding-toggle" title="Auto-apply file edits and continue. Shell and Git tools still ask."><input id="autoMode" type="checkbox" /> Auto</label>
+    <label class="coding-toggle" title="Include this repository's imported research context"><input id="contextPack" type="checkbox" /> Pack</label>
     <select id="model" aria-label="Model"></select>
     <button id="canvasToggle" type="button" aria-controls="canvasPanel" aria-expanded="false">Canvas</button>
     <button id="newSess" title="New session">New</button>
@@ -137,6 +138,9 @@
       <option value="test">Test</option>
       <option value="sec">Secrets</option>
       <option value="install">Install app</option>
+      <option value="self">Self-test</option>
+      <option value="next">Next task</option>
+      <option value="recall">Recall</option>
     </select>
     <span class="badge" id="selfBadge" title="Self-test result">checking</span>
   
@@ -144,7 +148,7 @@
       <button id="diag"></button><button id="memBtn"></button><button id="ctxBtn"></button>
       <button id="expBtn"></button><button id="wfBtn"></button><button id="testBtn"></button>
       <button id="nextTask"></button><button id="secBtn"></button><button id="installBtn"></button>
-      <button id="memSearch"></button>
+      <button id="memSearch"></button><button id="selfBtn"></button>
     </div>
 </header>
   <main>
@@ -270,15 +274,6 @@
         log.appendChild(el);
       }
     });
-    fetch("/api/health").then(r => r.json()).then(h => {
-      const b = document.getElementById("ollama");
-      if (b) { b.textContent = h.ollama && h.ollama.ok ? "ollama: up" : "ollama: down"; b.className = h.ollama && h.ollama.ok ? "badge ok" : "badge"; }
-      const sb = document.getElementById("selfBadge");
-      if (sb && sb.textContent === "checking") sb.textContent = "partial";
-    }).catch(() => {
-      const sb = document.getElementById("selfBadge");
-      if (sb) sb.textContent = "offline";
-    });
     setTimeout(() => {
       const log = document.getElementById("log");
       const sb = document.getElementById("selfBadge");
@@ -315,7 +310,7 @@
     let currentTaskId = null;
     const contextFiles = new Set();
     const activeSkills = new Set();
-    let searchEnabled = true;
+    let searchEnabled = false;
     let currentRepo = "";
     let includeContext = false;
     let estimateSequence = 0;
@@ -335,7 +330,7 @@
 
     function promptPayload(codingMode = false) {
       return {
-        sessionId: ensureSessionId(),
+        sessionId,
         model: modelSel.value,
         messages,
         contextFiles: [...contextFiles],
@@ -357,11 +352,8 @@
     function addMsg(role, text) {
       const el = document.createElement("div");
       el.className = "msg " + role;
-      const stamp = document.createElement("span");
-      stamp.className = "msg-time";
-      stamp.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      el.appendChild(stamp);
-      el.appendChild(document.createTextNode(text));
+      el.dataset.time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      el.textContent = text;
       log.appendChild(el);
       log.scrollTop = log.scrollHeight;
       return el;
@@ -477,7 +469,7 @@
           if (!r.ok) throw new Error(data.error || "tool request rejected");
           approvalId = data.approvalId;
           allow.disabled = false;
-          const auto = true;
+          const auto = document.getElementById("autoMode").checked;
           if (auto && canAutoApplyTool(toolObj.tool)) {
             status.textContent = "Auto-applying…";
             allow.click();
@@ -512,15 +504,9 @@
     }
 
     async function requestAssistantTurn(codingMode, signal, repositoryContext) {
-      const ollamaBadge = document.getElementById("ollama");
-      if (ollamaBadge && ollamaBadge.textContent.includes("down")) {
-        addMsg("system", "Ollama is down. Start it with: ollama serve");
-        return { full: "", tools: [] };
-      }
       const turnSession = ensureSessionId();
       const assistantEl = addMsg("assistant", "Thinking...");
       let full = "";
-      let gotToken = false;
       try {
         const r = await fetch("/api/chat", {
           signal,
@@ -543,7 +529,6 @@
           truncated: r.headers.get("X-Prompt-Truncated") === "true",
         });
         await consumeChatStream(r.body, (delta) => {
-          if (!gotToken) { gotToken = true; assistantEl.textContent = ""; }
           full += delta;
           assistantEl.textContent = full;
           log.scrollTop = log.scrollHeight;
@@ -716,6 +701,7 @@
       sessionId = null;
       messages = [];
       includeContext = false;
+      document.getElementById("contextPack").checked = false;
       log.innerHTML = "";
       addMsg("system", "Task: " + t.title + " (" + t.type + ")");
       if (t.skill) {
@@ -761,8 +747,11 @@
         del.style.cssText = "padding:2px 6px;opacity:0.6";
         del.onclick = async (e) => {
           e.stopPropagation();
-          if (!confirm("Delete this session?")) return;
-          await fetch("/api/session?id=" + s.id, { method: "DELETE" });
+          if (activeRun || !confirm("Delete this session?")) return;
+          const r = await fetch("/api/session/delete", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: s.id }),
+          });
+          if (!r.ok) { addMsg("system", "Could not delete this session."); return; }
           if (s.id === sessionId) { sessionId = null; localStorage.removeItem("ca_session"); log.innerHTML = ""; messages = []; }
           loadSessions();
         };
@@ -778,6 +767,7 @@
       localStorage.setItem("ca_session", id);
       messages = s.messages || [];
       includeContext = s.includeContext === true;
+      document.getElementById("contextPack").checked = includeContext;
       currentRepo = s.repo || "";
       const rp = document.getElementById("repoPath"); rp.value = currentRepo; rp.title = currentRepo;
       contextFiles.clear();
@@ -798,7 +788,7 @@
       document.getElementById("ctxLabel").textContent = (contextFiles.size ? "Files: " + [...contextFiles].join(", ") : "Files: none") + (includeContext ? " · pack on" : " · pack off");
       document.getElementById("meterText").textContent = "estimating…";
       try {
-        const codingMode = true;
+        const codingMode = document.getElementById("codingMode").checked;
         const r = await fetch("/api/context/estimate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -875,7 +865,7 @@
       const d = await r.json();
       addMsg("system", r.ok ? "Imported " + d.name + " into context pack" : "Import failed");
     };
-    /* context always on */ const _ctx = async (event) => {
+    document.getElementById("contextPack").onchange = async (event) => {
       includeContext = event.target.checked;
       await saveSession();
       refreshCtx();
@@ -969,16 +959,23 @@ document.getElementById("expBtn").onclick = async () => {
     };
 
     async function health() {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 8000);
-      const r = await fetch(sessionUrl("/api/health"), { signal: ctrl.signal }).finally(() => clearTimeout(t));
-      const h = await r.json();
+      const url = sessionUrl("/api/health");
+      const o = document.getElementById("ollama");
+      let h;
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!r.ok) throw new Error("health check failed");
+        h = await r.json();
+      } catch {
+        if (url === sessionUrl("/api/health")) { o.textContent = "ollama: unknown"; o.className = "badge"; }
+        return;
+      }
+      if (url !== sessionUrl("/api/health")) return;
       currentRepo = h.repoRoot || "";
       const rp = document.getElementById("repoPath"); rp.value = currentRepo; rp.title = currentRepo;
       if (!h.shellAllowed) {
         addMsg("system", "Code loop can inspect files and propose approved edits. To run tests, launch with CA_ALLOW_SHELL=1; each command still needs your approval.");
       }
-      const o = document.getElementById("ollama");
       if (h.ollama?.ok) {
         o.textContent = "ollama: up"; o.className = "badge ok";
         modelSel.innerHTML = "";
@@ -992,6 +989,7 @@ document.getElementById("expBtn").onclick = async () => {
         document.getElementById("modelBadge").textContent = modelSel.value;
       } else {
         o.textContent = "ollama: down"; o.className = "badge";
+        o.title = "Start Ollama with ollama serve, then retry.";
       }
     }
 
@@ -1018,7 +1016,7 @@ document.getElementById("expBtn").onclick = async () => {
     });
 
 document.getElementById("searchBadge").onclick = () => {
-      searchEnabled = true;
+      searchEnabled = !searchEnabled;
       const b = document.getElementById("searchBadge");
       b.textContent = searchEnabled ? "search: on" : "search: off";
       b.className = searchEnabled ? "badge ok" : "badge";
@@ -1058,6 +1056,7 @@ document.getElementById("searchBadge").onclick = () => {
       input.value = currentRepo;
       contextFiles.clear();
       includeContext = false;
+      document.getElementById("contextPack").checked = false;
       await saveSession();
       await Promise.all([health(), loadTree(""), loadSkills()]);
       refreshCtx();
@@ -1416,7 +1415,8 @@ document.getElementById("searchBadge").onclick = () => {
       if (previewFrame.src) previewStatus.textContent = "Preview navigation completed. Sites that block framing can be opened in a new tab.";
     });
 
-    /* code always on */
+    const codingToggle = document.getElementById("codingMode");
+    codingToggle.addEventListener("change", refreshCtx);
     
     document.getElementById("input").addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
@@ -1429,15 +1429,11 @@ document.getElementById("searchBadge").onclick = () => {
     stopRun.onclick = () => {
       stopRun.disabled = true;
       activeRun?.abort();
-      setTimeout(() => { activeRun = null; stopRun.hidden = true; stopRun.disabled = false; document.getElementById("send").disabled = false; }, 500);
     };
 
 document.getElementById("form").addEventListener("submit", async (ev) => {
       ev.preventDefault();
-      if (activeRun) {
-        if (activeRun._started && Date.now() - activeRun._started > 30000) { activeRun.abort(); activeRun = null; }
-        else return;
-      }
+      if (activeRun) return;
       const input = document.getElementById("input");
       const text = input.value.trim();
       if (!text) return;
@@ -1451,10 +1447,9 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
         addMsg("user", text);
       }
       const send = document.getElementById("send");
-      const codingMode = true;
+      const codingMode = codingToggle.checked;
       const turnSession = ensureSessionId();
       const controller = new AbortController();
-      controller._started = Date.now();
       activeRun = controller;
       stopRun.hidden = false;
       stopRun.disabled = false;
@@ -1497,7 +1492,7 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
       loadSessions();
       loadTasks();
     }
-    initialize();
+    initialize().catch(() => addMsg("system", "Could not load Code Agent. Reload to retry."));
     setInterval(loadTasks, 15000);
   
     document.getElementById("selfBtn").addEventListener("click", async () => {
@@ -1546,13 +1541,14 @@ document.getElementById("form").addEventListener("submit", async (ev) => {
     document.getElementById("moreMenu").onchange = (e) => {
       const v = e.target.value;
       e.target.value = "";
-      const map = { diag: "diag", mem: "memBtn", ctx: "ctxBtn", exp: "expBtn", wf: "wfBtn", test: "testBtn", sec: "secBtn", install: "installBtn" };
+      const map = { diag: "diag", mem: "memBtn", ctx: "ctxBtn", exp: "expBtn", wf: "wfBtn", test: "testBtn", sec: "secBtn", install: "installBtn", self: "selfBtn", next: "nextTask", recall: "memSearch" };
       if (map[v]) document.getElementById(map[v])?.click();
     };
     // Auto self-test on load
     (async () => {
       try {
-        const r = await fetch("/api/selftest");
+        const r = await fetch(sessionUrl("/api/selftest"), { signal: AbortSignal.timeout(8000) });
+        if (!r.ok) throw new Error("self-test failed");
         const j = await r.json();
         const ok = j.ollama === "up" && j.git === "ok";
         const b = document.getElementById("selfBadge");

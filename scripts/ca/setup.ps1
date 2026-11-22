@@ -222,7 +222,6 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     '$env:RUNCALC_REPO = $repo'
     '$env:CA_AGENT_ROOT = $PSScriptRoot'
     '$env:CA_ALLOW_SHELL = ''1'''
-    'try {'
     '# Auto-update: if a newer pin is published, re-run Get-CodeAgent.cmd once'
     '$pinFile = Join-Path $PSScriptRoot ''source\pin.txt'''
     '$remote = ''https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/Get-CodeAgent.cmd'''
@@ -245,15 +244,10 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     '$listenerIds = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)'
     'foreach ($listenerId in $listenerIds) {'
     '  $listener = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerId"'
-    '  if ($listener.Name -eq ''node.exe'' -and $listener.CommandLine -match $serverArg) { Write-Host "Already running."; & (Join-Path $app ''ui\open-app.ps1'') -Port $port; exit 0 }'
+    '  if ($listener.Name -ne ''node.exe'' -or $listener.CommandLine -notmatch $serverArg) { throw "Port $port is in use by another program. Code Agent did not stop it." }'
     '}'
     'foreach ($listenerId in $listenerIds) {'
-    '  try { Stop-Process -Id $listenerId -Force -ErrorAction Stop } catch {'
-    '    Write-Host "Cannot stop existing server. Opening it instead."'
-    '    & (Join-Path $app ''ui\open-app.ps1'') -Port $port'
-    '    Read-Host "Press Enter to close"'
-    '    exit 0'
-    '  }'
+    '  Stop-Process -Id $listenerId'
     '  Wait-Process -Id $listenerId -Timeout 10 -ErrorAction SilentlyContinue'
     '}'
     '$proc = Start-Process node -ArgumentList @("`"$server`"", ''--port'', "$port", ''--model'', $model) -WorkingDirectory $app -WindowStyle Hidden -PassThru'
@@ -267,13 +261,6 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     'if (-not $listening) { throw "Code Agent server did not start listening on port $port." }'
     '& (Join-Path $app ''ui\open-app.ps1'') -Port $port'
     'Write-Host "Code Agent model=$model repo=$repo pid=$($proc.Id)"'
-    'Write-Host "Server running. Leave this window open or press Enter to close."'
-    'Read-Host "Press Enter"'
-    '} catch {'
-    '  Write-Host "FAILED: $($_.Exception.Message)" -ForegroundColor Red'
-    '  Read-Host "Press Enter to close"'
-    '  exit 1'
-    '}'
   )
   Set-Content -LiteralPath $run -Value $lines -Encoding UTF8
 }
@@ -321,144 +308,29 @@ function Verify-Installation([string]$Model) {
 
 function Ensure-TestingStack {
   Step "Free testing stack"
-  # On Windows the coder launches Edge (channel: msedge). No Playwright browser download is needed.
-  $edge = @(
-    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
-    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
-  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
-  if ($edge) {
-    Info "Using installed Microsoft Edge for browser tests: $edge"
-  } else {
-    Info "Microsoft Edge not found. Browser tests need Edge or CA_TEST_BROWSER_PATH."
-  }
   $cli = Join-Path $AgentRoot "app/ui/node_modules/playwright-core/cli.js"
-  $node = (Get-Command node -ErrorAction SilentlyContinue).Source
-  if ((Test-Path -LiteralPath $cli -PathType Leaf) -and $node) {
-    $cache = Join-Path $env:USERPROFILE "AppData\Local\ms-playwright"
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    foreach ($browser in @("chromium", "firefox", "webkit")) {
-      $present = $false
-      if (Test-Path -LiteralPath $cache) {
-        $present = [bool](Get-ChildItem -LiteralPath $cache -Directory -ErrorAction SilentlyContinue |
-          Where-Object { $_.Name -like "$browser-*" })
-      }
-      if ($present) {
-        Info "$browser already installed"
-        continue
-      }
-      Info "Downloading Playwright $browser"
-      & $node $cli install $browser 2>&1 | Out-Null
-      if ($LASTEXITCODE -eq 0) { Info "$browser ready" }
-      else { Info "$browser download failed (exit $LASTEXITCODE); continuing" }
+  try {
+    if (-not (Test-Path -LiteralPath $cli -PathType Leaf)) {
+      Info "Playwright CLI missing; skipping optional browser downloads."
+      return
     }
-    $ErrorActionPreference = $prev
-  } else {
-    Info "Playwright CLI or node missing; skipping browser downloads"
+    Info "Installing optional Playwright browser (chromium only)"
+    $prev = $ErrorActionPreference
+    try {
+      $ErrorActionPreference = "Continue"
+      & node $cli install chromium 2>&1 | Out-Null
+      $code = $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $prev
+    }
+    if ($code -ne 0) { Info "Playwright browser install exited $code; Code Agent can still use installed Edge." }
+    else { Info "Chromium ready" }
+  } catch {
+    Info "Optional Playwright browser downloads failed: $($_.Exception.Message)"
   }
 
   if (HasCmd "adb") { Info "Android platform-tools present" }
-  else {
-    Info "Installing Android platform-tools (adb)"
-    try {
-      $zip = Join-Path $env:TEMP "platform-tools.zip"
-      Invoke-WebRequest "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile $zip -UseBasicParsing
-      $dest = Join-Path $AgentRoot "platform-tools"
-      if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest | Out-Null }
-      Expand-Archive -Path $zip -DestinationPath $dest -Force
-      $adb = Join-Path $dest "platform-tools\adb.exe"
-      if (Test-Path $adb) {
-        $env:PATH = "$dest\platform-tools;" + $env:PATH
-        Info "adb installed at $adb"
-      } else { Info "adb extract failed; continuing" }
-    } catch { Info "adb install skipped: $($_.Exception.Message)" }
-  }
-
-  $hyperv = if (HasCmd "Get-WindowsOptionalFeature") {
-    Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -ErrorAction SilentlyContinue
-  }
-  if ($hyperv -and $hyperv.State -eq "Enabled") { Info "Hyper-V available for Windows guests" }
-  elseif (HasCmd "VBoxManage") { Info "VirtualBox available for OS guests" }
-  else {
-    Info "Installing VirtualBox"
-    try {
-      $vbox = Join-Path $env:TEMP "VirtualBox.exe"
-      Invoke-WebRequest "https://download.virtualbox.org/virtualbox/7.1.4/VirtualBox-7.1.4-165100-Win.exe" -OutFile $vbox -UseBasicParsing
-      $p = Start-Process $vbox -ArgumentList @("--silent") -Wait -PassThru
-      if ($p.ExitCode -eq 0) { Info "VirtualBox installed" }
-      else { Info "VirtualBox installer exited $($p.ExitCode); continuing" }
-    } catch { Info "VirtualBox skipped: $($_.Exception.Message)" }
-  }
-}
-
-
-
-
-function Ensure-Docker {
-  if (HasCmd "docker") { Info "Docker already installed"; return }
-  Step "Docker Desktop"
-  Info "Installing Docker Desktop"
-  $installer = Join-Path $env:TEMP "DockerDesktopInstaller.exe"
-  try {
-    Invoke-WebRequest "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe" -OutFile $installer -UseBasicParsing
-    $p = Start-Process $installer -ArgumentList @("install", "--quiet", "--accept-license") -Wait -PassThru
-    if ($p.ExitCode -eq 0) { Info "Docker Desktop installed; a reboot or manual start may be needed" }
-    else { Info "Docker installer exited $($p.ExitCode); Windmill and Activepieces will be skipped" }
-  } catch {
-    Info "Docker install failed: $($_.Exception.Message)"
-  }
-  Refresh-Path
-}
-
-function Ensure-WorkflowTools {
-  Step "Free workflow tools"
-  # Node-RED: light, npm
-  if (HasCmd "node-red") { Info "Node-RED already installed" }
-  else {
-    Info "Installing Node-RED"
-    try {
-      & npm.cmd install -g node-red
-      if (HasCmd "node-red") { Info "Node-RED ready (run: node-red)" }
-      else { Info "Node-RED install failed; continuing" }
-    } catch {
-      Info "Node-RED skipped: $($_.Exception.Message)"
-    }
-  }
-  # Docker-based tools
-  if (-not (HasCmd "docker")) { Info "Docker not found; skipping Windmill and Activepieces"; return }
-  Info "Docker present; starting Windmill and Activepieces"
-  $compose = Join-Path $AgentRoot "workflow-tools.yml"
-  @"
-services:
-  windmill-db:
-    image: postgres:16
-    environment:
-      POSTGRES_PASSWORD: windmill
-      POSTGRES_DB: windmill
-    volumes: ["windmill-db:/var/lib/postgresql/data"]
-  windmill:
-    image: ghcr.io/windmill-labs/windmill:main
-    ports: ["8000:8000"]
-    environment:
-      DATABASE_URL: postgres://postgres:windmill@windmill-db/windmill?sslmode=disable
-    depends_on: [windmill-db]
-  activepieces:
-    image: activepieces/activepieces:latest
-    ports: ["8080:80"]
-    environment:
-      AP_ENGINE_EXECUTABLE_PATH: dist/packages/server/api/main.js
-    volumes: ["activepieces:/root/.activepieces"]
-volumes:
-  windmill-db:
-  activepieces:
-"@ | Set-Content -LiteralPath $compose -Encoding ASCII
-  try {
-    & docker compose -f $compose up -d 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) { Info "Windmill on :8000, Activepieces on :8080" }
-    else { Info "Docker compose failed; tools not started" }
-  } catch {
-    Info "Workflow containers skipped: $($_.Exception.Message)"
-  }
+  else { Info "Android testing tools are not installed by Code Agent." }
 }
 
 try {
@@ -472,9 +344,7 @@ try {
   $model = Select-Model
   Ensure-Model $model
   Copy-App $repo $model
-  Ensure-TestingStack
-  Ensure-Docker
-  Ensure-WorkflowTools
+  if ($InstallTestBrowsers) { Ensure-TestingStack }
   Create-Shortcuts
   Verify-Installation $model
   if ($LaunchChat -and -not $NoLaunch) {
