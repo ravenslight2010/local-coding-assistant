@@ -233,7 +233,7 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     '  $localVer = if (Test-Path $pinFile) { (Get-Content $pinFile -Raw).Trim() } else { '''' }'
     '  if ($remoteVer -and $remoteVer -ne $localVer) {'
     '    Write-Host "Update available: $remoteVer"'
-    '    & $tmp'
+    '    & $tmp /coreonly'
     '    exit 0'
     '  }'
     '} catch {}'

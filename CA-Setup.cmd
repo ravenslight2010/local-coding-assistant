@@ -7,14 +7,15 @@ set "REPO=%~dp0"
 set "SETUP=%~dp0scripts\ca\setup.ps1"
 set "STARTUP="
 set "TESTBROWSERS="
-set "EXTRAS="
+set "EXTRAS=-InstallExtras"
 set "LAUNCH=-LaunchChat"
 
 :parse
 if "%~1"=="" goto done
 if /i "%~1"=="/startup" set "STARTUP=-AddStartup"
 if /i "%~1"=="/nolaunch" set "LAUNCH=-NoLaunch"
-if /i "%~1"=="/testbrowsers" set "TESTBROWSERS=-InstallTestBrowsers"
+if /i "%~1"=="/testbrowsers" ( set "TESTBROWSERS=-InstallTestBrowsers" & set "EXTRAS=" )
+if /i "%~1"=="/coreonly" ( set "TESTBROWSERS=" & set "EXTRAS=" )
 if /i "%~1"=="/extras" set "EXTRAS=-InstallExtras"
 shift
 goto parse

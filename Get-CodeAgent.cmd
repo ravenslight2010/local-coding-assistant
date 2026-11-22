@@ -10,12 +10,13 @@ set "SOURCE=%AGENT%\source\%VERSION%"
 set "STARTUP="
 set "MODEL="
 set "TESTBROWSERS="
-set "EXTRAS="
+set "EXTRAS=-InstallExtras"
 
 :parse
 if "%~1"=="" goto done
 if /i "%~1"=="/startup" set "STARTUP=-AddStartup"
-if /i "%~1"=="/testbrowsers" set "TESTBROWSERS=-InstallTestBrowsers"
+if /i "%~1"=="/testbrowsers" ( set "TESTBROWSERS=-InstallTestBrowsers" & set "EXTRAS=" )
+if /i "%~1"=="/coreonly" ( set "TESTBROWSERS=" & set "EXTRAS=" )
 if /i "%~1"=="/extras" set "EXTRAS=-InstallExtras"
 if /i "%~1"=="/model" ( set "MODEL=%~2" & shift )
 shift
