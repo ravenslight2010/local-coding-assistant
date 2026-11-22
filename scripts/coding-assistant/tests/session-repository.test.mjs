@@ -16,6 +16,7 @@ const firstRepo = path.join(tempRoot, "first");
 const secondRepo = path.join(tempRoot, "second");
 const agentRoot = path.join(tempRoot, "agent");
 const prompts = [];
+const assistantResponses = [];
 let serverProcess;
 let upstream;
 let baseUrl;
@@ -55,7 +56,13 @@ before(async () => {
       }
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
       prompts.push(body);
-      res.end(JSON.stringify({ choices: [{ message: { content: "ok" } }] }));
+      const content = assistantResponses.shift() || "ok";
+      if (body.stream) {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.end(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: [DONE]\n\n`);
+        return;
+      }
+      res.end(JSON.stringify({ choices: [{ message: { content } }] }));
     });
   });
   await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
@@ -275,6 +282,54 @@ test("Browse opens inside the app and selects a repository at desktop and phone 
       assert.equal(afterClone.repo, realpathSync.native(firstRepo));
       await page.close();
     }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Code loop verifies the selected repository and retries an access refusal", {
+  timeout: 20_000,
+  skip: process.platform !== "win32" && !process.env.CA_TEST_BROWSER_PATH,
+}, async () => {
+  writeFileSync(path.join(secondRepo, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
+  mkdirSync(path.join(secondRepo, "calculator-src"));
+  writeFileSync(path.join(secondRepo, ".env"), "PRIVATE_MARKER=example\n");
+  assert.equal((await post("/api/repo", { sessionId: "recover-session", path: secondRepo })).status, 200);
+  const firstPrompt = prompts.length;
+  assistantResponses.push(
+    "I'm sorry, but I don't have the ability to access or modify files on your computer.",
+    '```tool\n{"tool":"read","path":"package.json"}\n```',
+    "I inspected the selected repository and its test script.",
+  );
+  const runtime = path.join(sourceRepo, "scripts/coding-assistant/chat-ui/package.json");
+  const { chromium } = createRequire(runtime)("playwright-core");
+  const browser = await chromium.launch(process.env.CA_TEST_BROWSER_PATH
+    ? { executablePath: process.env.CA_TEST_BROWSER_PATH }
+    : { channel: "msedge" });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript((id) => localStorage.setItem("ca_session", id), "recover-session");
+    await page.goto(baseUrl);
+    page.setDefaultTimeout(6000);
+    await page.getByRole("button", { name: /calculator-src/ }).waitFor();
+    const input = page.locator("#input");
+    await input.fill("Run the repo tests and debug it");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.getByText("I inspected the selected repository and its test script.").waitFor();
+    await page.getByText("Repository read complete.", { exact: true }).waitFor();
+    assert.equal(assistantResponses.length, 0);
+    const requests = prompts.slice(firstPrompt);
+    assert.equal(requests.length, 3);
+    const [, retryPrompt, resultPrompt] = requests;
+    const correction = retryPrompt.messages.at(-1).content;
+    assert.match(correction, /Top-level repository entries/);
+    assert.ok(retryPrompt.messages[0].content.includes(`Current repo: ${realpathSync.native(secondRepo)}`));
+    assert.match(correction, /"calculator-src"/);
+    assert.match(correction, /"Discovered test\/check script names":\["test"\]/);
+    assert.doesNotMatch(correction, /node --test|\.env|PRIVATE_MARKER/);
+    assert.match(resultPrompt.messages.at(-1).content, /node --test/);
+    assert.doesNotMatch(JSON.stringify(resultPrompt), /Code Agent verified that the selected local repository is accessible/);
+    await page.close();
   } finally {
     await browser.close();
   }
