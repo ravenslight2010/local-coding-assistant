@@ -2,19 +2,22 @@
 setlocal EnableExtensions
 title Get Code Agent
 echo Code Agent installer/updater v4
-set "VERSION=de9d69814e29c118b60a8e9feb4bcd7eb01669b7"
-set "EXPECTED=ce382c24eff4c6f726303c9cb70d4d33b83ed5609ea31af0767115a1d300e2d0"
+set "VERSION=3f7666a77bfed07eac7a85529a2bc8a5d080e37d"
+set "EXPECTED=aed7ffaa4445237f715d9b9ec0938876d2050fefc1be9629e1dfdb6999de4118"
 echo Source pin: %VERSION%
 set "AGENT=C:\runcalc\agent"
 set "SOURCE=%AGENT%\source\%VERSION%"
 set "STARTUP="
 set "MODEL="
 set "TESTBROWSERS="
+set "EXTRAS=-InstallExtras"
 
 :parse
 if "%~1"=="" goto done
 if /i "%~1"=="/startup" set "STARTUP=-AddStartup"
-if /i "%~1"=="/testbrowsers" set "TESTBROWSERS=-InstallTestBrowsers"
+if /i "%~1"=="/testbrowsers" ( set "TESTBROWSERS=-InstallTestBrowsers" & set "EXTRAS=" )
+if /i "%~1"=="/coreonly" ( set "TESTBROWSERS=" & set "EXTRAS=" )
+if /i "%~1"=="/extras" set "EXTRAS=-InstallExtras"
 if /i "%~1"=="/model" ( set "MODEL=%~2" & shift )
 shift
 goto parse
@@ -60,9 +63,9 @@ if errorlevel 1 (
 )
 
 if defined MODEL (
-  powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% %TESTBROWSERS% -LaunchChat -Model "%MODEL%"
+  powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% %TESTBROWSERS% %EXTRAS% -LaunchChat -Model "%MODEL%"
 ) else (
-  powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% %TESTBROWSERS% -LaunchChat
+  powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SOURCE%\scripts\ca\setup.ps1" -RepoRoot "%SOURCE%" -AgentRoot "%AGENT%" %STARTUP% %TESTBROWSERS% %EXTRAS% -LaunchChat
 )
 set "EC=%ERRORLEVEL%"
 echo.

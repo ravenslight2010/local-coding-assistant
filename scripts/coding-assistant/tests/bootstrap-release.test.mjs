@@ -15,3 +15,15 @@ test("one-click bootstrap is commit-pinned, hash-verified, and avoids execution-
   assert.doesNotMatch(source, /raw\.githubusercontent\.com.*setup\.ps1/);
   assert.doesNotMatch(source, /ExecutionPolicy Bypass/i);
 });
+
+test("both Windows installers default to all-in-one setup and allow a core-only run", () => {
+  for (const file of ["Get-CodeAgent.cmd", "CA-Setup.cmd"]) {
+    const source = readFileSync(path.join(root, file), "utf8");
+    assert.match(source, /^set "EXTRAS=-InstallExtras"\r?$/m);
+    assert.match(source, /"\/coreonly" \( set "TESTBROWSERS=" & set "EXTRAS=" \)/);
+    assert.match(source, /"\/testbrowsers" \( set "TESTBROWSERS=-InstallTestBrowsers" & set "EXTRAS=" \)/);
+    assert.match(source, /powershell.*%TESTBROWSERS% %EXTRAS%/);
+  }
+  const setup = readFileSync(path.join(root, "scripts", "ca", "setup.ps1"), "utf8");
+  assert.match(setup, /& \$tmp \/coreonly/);
+});

@@ -9,6 +9,7 @@ param(
   [switch]$SkipSkillsInstall,
   [switch]$SkipModelPull,
   [switch]$InstallTestBrowsers,
+  [switch]$InstallExtras,
   [ValidateSet("speed", "balanced")]
   [string]$ModelPolicy = "speed",
   [string]$Model = ""
@@ -232,7 +233,7 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     '  $localVer = if (Test-Path $pinFile) { (Get-Content $pinFile -Raw).Trim() } else { '''' }'
     '  if ($remoteVer -and $remoteVer -ne $localVer) {'
     '    Write-Host "Update available: $remoteVer"'
-    '    & $tmp'
+    '    & $tmp /coreonly'
     '    exit 0'
     '  }'
     '} catch {}'
@@ -306,7 +307,7 @@ function Verify-Installation([string]$Model) {
 }
 
 
-function Ensure-TestingStack {
+function Ensure-TestingStack([string[]]$Browsers = @("chromium")) {
   Step "Free testing stack"
   $cli = Join-Path $AgentRoot "app/ui/node_modules/playwright-core/cli.js"
   try {
@@ -314,23 +315,60 @@ function Ensure-TestingStack {
       Info "Playwright CLI missing; skipping optional browser downloads."
       return
     }
-    Info "Installing optional Playwright browser (chromium only)"
+    Info "Installing missing Playwright browsers: $($Browsers -join ', ')"
     $prev = $ErrorActionPreference
     try {
       $ErrorActionPreference = "Continue"
-      & node $cli install chromium 2>&1 | Out-Null
+      & node $cli install @Browsers 2>&1 | Out-Null
       $code = $LASTEXITCODE
     } finally {
       $ErrorActionPreference = $prev
     }
     if ($code -ne 0) { Info "Playwright browser install exited $code; Code Agent can still use installed Edge." }
-    else { Info "Chromium ready" }
+    elseif ($Browsers.Count -eq 1 -and $Browsers[0] -eq "chromium") { Info "Chromium ready" }
+    else { Info "Requested Playwright browsers ready" }
   } catch {
     Info "Optional Playwright browser downloads failed: $($_.Exception.Message)"
   }
 
-  if (HasCmd "adb") { Info "Android platform-tools present" }
-  else { Info "Android testing tools are not installed by Code Agent." }
+}
+
+function Install-MissingExtras {
+  Step "Optional Windows tools"
+  if (-not (HasCmd "winget.exe")) {
+    Info "WinGet not found. Install Microsoft App Installer, then rerun setup with /extras."
+    return
+  }
+  $ErrorActionPreference = "Continue"
+  $packages = @(
+    @{ Id = "Docker.DockerDesktop"; Name = "Docker Desktop"; Command = "Docker Desktop.exe"; Path = "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe" }
+    @{ Id = "Oracle.VirtualBox"; Name = "VirtualBox"; Command = "VBoxManage.exe"; Path = "$env:ProgramFiles\Oracle\VirtualBox\VBoxManage.exe" }
+    @{ Id = "Google.PlatformTools"; Name = "Android platform-tools"; Command = "adb.exe"; Path = "" }
+  )
+  foreach ($package in $packages) {
+    $name = $package.Name
+    try {
+      if ((HasCmd $package.Command) -or ($package.Path -and (Test-Path -LiteralPath $package.Path -PathType Leaf))) {
+        Info "$name already installed"
+        continue
+      }
+      & winget.exe list --id $package.Id --exact --source winget | Out-Host
+      if ($LASTEXITCODE -eq 0) {
+        Info "$name already installed"
+        continue
+      }
+      if ($LASTEXITCODE -ne [int]0x8A150014) {
+        Info "Could not check whether $name is installed (WinGet exit $LASTEXITCODE); skipping it."
+        continue
+      }
+      Info "Installing $name. Review any license or installer prompts."
+      & winget.exe install --id $package.Id --exact --source winget --interactive | Out-Host
+      if ($LASTEXITCODE -eq 0) { Info "$name installed" }
+      else { Info "$name was not installed (WinGet exit $LASTEXITCODE); continuing." }
+    } catch {
+      Info "$name setup did not complete: $($_.Exception.Message)"
+    }
+  }
 }
 
 try {
@@ -344,7 +382,12 @@ try {
   $model = Select-Model
   Ensure-Model $model
   Copy-App $repo $model
-  if ($InstallTestBrowsers) { Ensure-TestingStack }
+  if ($InstallExtras) {
+    Ensure-TestingStack -Browsers @("chromium", "firefox", "webkit")
+    Install-MissingExtras
+  } elseif ($InstallTestBrowsers) {
+    Ensure-TestingStack
+  }
   Create-Shortcuts
   Verify-Installation $model
   if ($LaunchChat -and -not $NoLaunch) {

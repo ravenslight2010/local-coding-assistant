@@ -3,22 +3,25 @@
 ## Current pin
 `Get-CodeAgent.cmd` installs immutable source:
 
-- Commit: `de9d69814e29c118b60a8e9feb4bcd7eb01669b7`
-- Archive SHA-256: `ce382c24eff4c6f726303c9cb70d4d33b83ed5609ea31af0767115a1d300e2d0`
+- Commit: `3f7666a77bfed07eac7a85529a2bc8a5d080e37d`
+- Archive SHA-256: `aed7ffaa4445237f715d9b9ec0938876d2050fefc1be9629e1dfdb6999de4118`
 
-This pin restores chat, Stop, and optional browser setup. The updater replaces only the installed Code Agent server; it does not stop a different program using the port.
+This pin makes all-in-one setup the default when you run the installer. The updater replaces only the installed Code Agent server; it does not stop a different program using the port.
 
 ## How to run
-Double-click `Get-CodeAgent.cmd`. It requests Administrator, verifies the zip, then runs setup.
+Double-click `Get-CodeAgent.cmd`. It requests Administrator, verifies the zip, installs or updates Code Agent, then checks for missing companion tools. The extracted bundle's `CA-Setup.cmd` does the same using its local source.
 
 ## Options
 ```bat
 Get-CodeAgent.cmd /startup
 Get-CodeAgent.cmd /model qwen2.5-coder:7b
 Get-CodeAgent.cmd /testbrowsers
+Get-CodeAgent.cmd /coreonly
 ```
 
-Setup uses installed Microsoft Edge for Canvas checks. Run `Get-CodeAgent.cmd /testbrowsers` to download Playwright’s Chromium, Firefox, and WebKit during setup. Failed optional browser downloads do not stop Code Agent setup.
+Setup uses installed Microsoft Edge for Canvas checks. By default, the installer adds missing Playwright Chromium, Firefox, and WebKit plus Docker Desktop, VirtualBox, and Android platform-tools. No flag is needed; `/extras` still works. Use `/coreonly` to skip companion tools or `/testbrowsers` to add only Playwright Chromium. Automatic updates triggered when opening Code Agent use `/coreonly`, so vendor installers don't open unexpectedly.
+
+The installer uses Windows Package Manager (WinGet) for the system tools. It skips installed tools rather than reinstalling or upgrading them and reports tools it couldn't check or install. Review any license or installer prompts yourself; setup does not start containers or configure virtual machines. Docker Desktop may require WSL 2, virtualization, or a reboot. Optional failures are recorded in the setup log without blocking Code Agent.
 
 If the application payload is already installed, add the browsers without rerunning setup. Run this in Command Prompt under the Windows account that will run the tests:
 
