@@ -321,16 +321,25 @@ function Ensure-TestingStack {
   if ($InstallTestBrowsers) {
     $cli = Join-Path $AgentRoot "app/ui/node_modules/playwright-core/cli.js"
     if (Test-Path -LiteralPath $cli -PathType Leaf) {
-      Info "Optional: downloading Playwright Chromium (not required on Windows)"
-      $prev = $ErrorActionPreference
-      $ErrorActionPreference = "Continue"
       $node = (Get-Command node -ErrorAction SilentlyContinue).Source
       if ($node) {
-        & $node $cli install chromium 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { Info "Chromium downloaded" } else { Info "Chromium download skipped (exit $LASTEXITCODE)" }
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        foreach ($browser in @("chromium", "firefox", "webkit")) {
+          Info "Downloading Playwright $browser"
+          & $node $cli install $browser 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) { Info "$browser ready" }
+          else { Info "$browser download failed (exit $LASTEXITCODE); continuing" }
+        }
+        $ErrorActionPreference = $prev
+      } else {
+        Info "node not found; skipping browser downloads"
       }
-      $ErrorActionPreference = $prev
+    } else {
+      Info "Playwright CLI missing; skipping browser downloads"
     }
+  } else {
+    Info "Pass /testbrowsers to also download Chromium, Firefox, and WebKit"
   }
 
   if (HasCmd "adb") { Info "Android platform-tools present" }
