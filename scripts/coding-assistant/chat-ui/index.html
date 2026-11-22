@@ -259,6 +259,26 @@
       <button id="browseSelect" type="button" class="ok" disabled>Use this folder</button>
     </div>
   </dialog>
+  <script>
+    window.addEventListener("error", (e) => {
+      const log = document.getElementById("log");
+      if (log && !log.textContent) {
+        const el = document.createElement("div");
+        el.className = "msg system";
+        el.textContent = "UI failed to load: " + (e.message || e.error || "unknown error") + ". Hard-refresh (Ctrl+Shift+R) or check the server is running.";
+        log.appendChild(el);
+      }
+    });
+    setTimeout(() => {
+      const log = document.getElementById("log");
+      if (log && !log.textContent) {
+        const el = document.createElement("div");
+        el.className = "msg system";
+        el.textContent = "UI still loading. If this stays, the server may not be running. Check the terminal that launched Code Agent.";
+        log.appendChild(el);
+      }
+    }, 8000);
+  </script>
   <script type="module">
     import { consumeChatStream } from "/chat-stream.mjs";
     import { canAutoApplyTool, supportsCodingLoopTool } from "/tool-policy.mjs";
