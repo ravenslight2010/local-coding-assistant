@@ -232,6 +232,8 @@ Write tools (approval required):
 Test tool (use this when asked to test; do not invent npm test):
 \`\`\`tool
 {"tool":"test","hint":"what changed"}
+{"tool":"lint"}
+{"tool":"typecheck"}
 \`\`\`
 It discovers the repo's real scripts and runs the ladder. Never run npm test unless the discovery says a test script exists.
 
@@ -327,6 +329,8 @@ function normalizeTool(root, tool) {
   }
   if (tool.tool === "install_app") return { tool: "install_app" };
   if (tool.tool === "test") return { tool: "test", hint: String(tool.hint || "").slice(0, 200) };
+  if (tool.tool === "lint") return { tool: "lint" };
+  if (tool.tool === "typecheck") return { tool: "typecheck" };
   if (tool.tool === "web_search" && typeof tool.query === "string") return { tool: "web_search", query: tool.query.slice(0, 200) };
   return null;
 }
@@ -1559,6 +1563,24 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
       return send(res, result.ok ? 200 : 400, { ...result, plan });
     }
 
+    if (tool.tool === "lint" || tool.tool === "typecheck") {
+      const discovery = discoverTests(root);
+      const scripts = discovery.scripts || {};
+      const name = tool.tool === "lint" ? "lint" : "typecheck";
+      const alt = tool.tool === "lint" ? ["lint", "eslint"] : ["typecheck", "check", "tsc"];
+      const found = alt.find(s => scripts[s]);
+      if (!found) return send(res, 200, { ok: true, output: "no " + name + " script in package.json" });
+      const { spawn } = await import("node:child_process");
+      const isWin = process.platform === "win32";
+      const cmd = "npm run " + found;
+      const child = spawn(isWin ? "cmd.exe" : "bash", isWin ? ["/d", "/s", "/c", cmd] : ["-lc", cmd], { cwd: root, windowsHide: true });
+      let out = "";
+      const append = (c) => { const t = c.toString(); if (out.length < 4000) out += t.slice(0, 4000 - out.length); };
+      child.stdout.on("data", append);
+      child.stderr.on("data", append);
+      const code = await new Promise((resolve) => { child.once("close", resolve); child.once("error", () => resolve(null)); });
+      return send(res, 200, { ok: code === 0, script: found, code, output: out.slice(0, 3000) });
+    }
     if (tool.tool === "web_search") {
       try {
         const q = encodeURIComponent(tool.query);
