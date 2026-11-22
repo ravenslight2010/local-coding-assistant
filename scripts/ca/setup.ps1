@@ -345,14 +345,37 @@ function Ensure-TestingStack {
   }
 
   if (HasCmd "adb") { Info "Android platform-tools present" }
-  else { Info "Android AVD not installed. Install Android Studio and create one AVD for real Android tests." }
+  else {
+    Info "Installing Android platform-tools (adb)"
+    try {
+      $zip = Join-Path $env:TEMP "platform-tools.zip"
+      Invoke-WebRequest "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile $zip -UseBasicParsing
+      $dest = Join-Path $AgentRoot "platform-tools"
+      if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest | Out-Null }
+      Expand-Archive -Path $zip -DestinationPath $dest -Force
+      $adb = Join-Path $dest "platform-tools\adb.exe"
+      if (Test-Path $adb) {
+        $env:PATH = "$dest\platform-tools;" + $env:PATH
+        Info "adb installed at $adb"
+      } else { Info "adb extract failed; continuing" }
+    } catch { Info "adb install skipped: $($_.Exception.Message)" }
+  }
 
   $hyperv = if (HasCmd "Get-WindowsOptionalFeature") {
     Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -ErrorAction SilentlyContinue
   }
   if ($hyperv -and $hyperv.State -eq "Enabled") { Info "Hyper-V available for Windows guests" }
   elseif (HasCmd "VBoxManage") { Info "VirtualBox available for OS guests" }
-  else { Info "No free VM tool detected. Install VirtualBox or enable Hyper-V if you need OS guests." }
+  else {
+    Info "Installing VirtualBox"
+    try {
+      $vbox = Join-Path $env:TEMP "VirtualBox.exe"
+      Invoke-WebRequest "https://download.virtualbox.org/virtualbox/7.1.4/VirtualBox-7.1.4-165100-Win.exe" -OutFile $vbox -UseBasicParsing
+      $p = Start-Process $vbox -ArgumentList @("--silent") -Wait -PassThru
+      if ($p.ExitCode -eq 0) { Info "VirtualBox installed" }
+      else { Info "VirtualBox installer exited $($p.ExitCode); continuing" }
+    } catch { Info "VirtualBox skipped: $($_.Exception.Message)" }
+  }
 }
 
 
