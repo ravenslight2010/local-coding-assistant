@@ -505,8 +505,9 @@
         return { full: "", tools: [] };
       }
       const turnSession = ensureSessionId();
-      const assistantEl = addMsg("assistant", "");
+      const assistantEl = addMsg("assistant", "Thinking...");
       let full = "";
+      let gotToken = false;
       try {
         const r = await fetch("/api/chat", {
           signal,
@@ -529,6 +530,7 @@
           truncated: r.headers.get("X-Prompt-Truncated") === "true",
         });
         await consumeChatStream(r.body, (delta) => {
+          if (!gotToken) { gotToken = true; assistantEl.textContent = ""; }
           full += delta;
           assistantEl.textContent = full;
           log.scrollTop = log.scrollHeight;
