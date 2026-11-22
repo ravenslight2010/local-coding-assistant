@@ -750,6 +750,22 @@ function contextDir(root) {
 function readMemory(root) {
   try { return readFileSync(memoryFile(root), "utf8"); } catch { return ""; }
 }
+function generalMemoryFile() { return path.join(AGENT_ROOT, "memory", "general.md"); }
+function sharedMemoryFile() { return path.join(AGENT_ROOT, "memory", "shared.md"); }
+function readGeneralMemory() {
+  try { return readFileSync(generalMemoryFile(), "utf8"); } catch { return ""; }
+}
+function readSharedMemory() {
+  try { return readFileSync(sharedMemoryFile(), "utf8"); } catch { return ""; }
+}
+function importRepoBrief(root) {
+  const brief = loadProjectBrief(root);
+  if (!brief) return;
+  const key = repoKey(root);
+  const existing = listMemory(AGENT_ROOT, key, 50);
+  if (existing.some(it => it.kind === "brief")) return;
+  addMemory(AGENT_ROOT, key, { text: brief.slice(0, 2000), tags: ["brief", "imported"], kind: "brief" });
+}
 function appendMemory(root, line) {
   const file = memoryFile(root);
   mkdirSync(path.dirname(file), { recursive: true });
@@ -857,8 +873,13 @@ function buildChatBody(payload, root) {
   const latest = history.pop() || null;
   const fittedLatest = latest ? take("history", latest.content) : "";
 
+  importRepoBrief(root);
+  const general = readGeneralMemory();
+  if (general.trim()) sys += take("memory", `\n\nGeneral memory:\n${general}`);
+  const shared = readSharedMemory();
+  if (shared.trim()) sys += take("memory", `\n\nShared memory:\n${shared}`);
   const memory = readMemory(root);
-  if (memory.trim()) sys += take("memory", `\n\nProject memory:\n${memory}`);
+  if (memory.trim()) sys += take("memory", `\n\nRepo memory:\n${memory}`);
   const brief = loadProjectBrief(root);
   if (brief) sys += take("memory", `\n\nProject brief:\n${brief}`);
 
@@ -1646,6 +1667,25 @@ if (req.method === "GET" && url.pathname === "/api/tasks") {
   }
 
 
+  if (req.method === "GET" && url.pathname === "/api/memory/tiers") {
+    const root = rootForSession(url.searchParams.get("sessionId"));
+    return send(res, 200, {
+      general: readGeneralMemory().slice(0, 4000),
+      shared: readSharedMemory().slice(0, 4000),
+      repo: readMemory(root).slice(0, 4000),
+    });
+  }
+  if (req.method === "POST" && url.pathname === "/api/memory/tier") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const tier = body.tier;
+    const file = tier === "general" ? generalMemoryFile() : tier === "shared" ? sharedMemoryFile() : null;
+    if (!file) return send(res, 400, { error: "tier must be general or shared" });
+    const dir = path.dirname(file);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const prev = existsSync(file) ? readFileSync(file, "utf8") : "";
+    writeFileSync(file, prev + "\n- " + String(body.text || "").slice(0, 500) + "\n");
+    return send(res, 200, { ok: true });
+  }
   if (req.method === "GET" && url.pathname === "/api/memory") {
     const root = rootForSession(url.searchParams.get("sessionId"));
     return send(res, 200, { content: readMemory(root) });
