@@ -308,22 +308,29 @@ function Verify-Installation([string]$Model) {
 
 function Ensure-TestingStack {
   Step "Free testing stack"
-  $cli = Join-Path $AgentRoot "app/ui/node_modules/playwright-core/cli.js"
-  try {
+  # On Windows the coder launches Edge (channel: msedge). No Playwright browser download is needed.
+  $edge = @(
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+  if ($edge) {
+    Info "Using installed Microsoft Edge for browser tests: $edge"
+  } else {
+    Info "Microsoft Edge not found. Browser tests need Edge or CA_TEST_BROWSER_PATH."
+  }
+  if ($InstallTestBrowsers) {
+    $cli = Join-Path $AgentRoot "app/ui/node_modules/playwright-core/cli.js"
     if (Test-Path -LiteralPath $cli -PathType Leaf) {
-      Info "Installing optional Playwright browser (chromium only)"
+      Info "Optional: downloading Playwright Chromium (not required on Windows)"
       $prev = $ErrorActionPreference
       $ErrorActionPreference = "Continue"
-      $out = & cmd.exe /d /s /c "node `"$cli`" install chromium" 2>&1
-      $code = $LASTEXITCODE
+      $node = (Get-Command node -ErrorAction SilentlyContinue).Source
+      if ($node) {
+        & $node $cli install chromium 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { Info "Chromium downloaded" } else { Info "Chromium download skipped (exit $LASTEXITCODE)" }
+      }
       $ErrorActionPreference = $prev
-      if ($code -ne 0) { Info "Playwright browser install exited $code; Code Agent can still use installed Edge." }
-      else { Info "Chromium ready" }
-    } else {
-      Info "Playwright CLI missing; skipping optional browser downloads."
     }
-  } catch {
-    Info "Optional Playwright browser downloads failed: $($_.Exception.Message)"
   }
 
   if (HasCmd "adb") { Info "Android platform-tools present" }
