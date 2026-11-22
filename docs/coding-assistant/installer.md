@@ -16,9 +16,12 @@ Double-click `Get-CodeAgent.cmd`. It requests Administrator, verifies the zip, t
 Get-CodeAgent.cmd /startup
 Get-CodeAgent.cmd /model qwen2.5-coder:7b
 Get-CodeAgent.cmd /testbrowsers
+Get-CodeAgent.cmd /extras
 ```
 
-Setup uses installed Microsoft Edge for Canvas checks. Run `Get-CodeAgent.cmd /testbrowsers` to download Playwright’s Chromium, Firefox, and WebKit during setup. Failed optional browser downloads do not stop Code Agent setup.
+Setup uses installed Microsoft Edge for Canvas checks. Use `/testbrowsers` to add Playwright Chromium only, or `/extras` to add Playwright Chromium, Firefox, and WebKit plus Docker Desktop, VirtualBox, and Android platform-tools. The extracted bundle supports `CA-Setup.cmd /extras` too.
+
+`/extras` uses Windows Package Manager (WinGet) for the system tools. It skips installed tools and reports tools it couldn't check or install. Review any license or installer prompts yourself; setup does not start containers or configure virtual machines. Docker Desktop may require WSL 2, virtualization, or a reboot. Optional failures are recorded in the setup log without blocking Code Agent.
 
 If the application payload is already installed, add the browsers without rerunning setup. Run this in Command Prompt under the Windows account that will run the tests:
 

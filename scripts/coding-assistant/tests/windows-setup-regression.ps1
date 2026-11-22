@@ -6,7 +6,7 @@ $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($setup, [ref]$null, [ref]$parseErrors)
 if ($parseErrors) { throw ($parseErrors.Message -join "`n") }
 
-foreach ($name in @("Ensure-TestingStack", "Write-RunScript")) {
+foreach ($name in @("Ensure-TestingStack", "Install-MissingExtras", "Write-RunScript")) {
   $definition = $ast.Find({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
@@ -90,6 +90,40 @@ process.exit(7);
   if ($actual -ne "install chromium") { throw "The pinned Playwright CLI was not called with the expected arguments." }
   if (-not ($messages -match "Playwright browser install exited 7")) { throw "Optional browser download failure was not reported." }
   Write-Host "PASS: Node runs the pinned optional browser CLI, and failure is nonfatal"
+
+  Ensure-TestingStack -Browsers @("chromium", "firefox", "webkit")
+  $actual = Get-Content -LiteralPath (Join-Path $cliDir "args.log") -Raw
+  if ($actual -ne "install chromium firefox webkit") { throw "Extras did not request all three Playwright browsers." }
+
+  & {
+    $calls = [System.Collections.Generic.List[string]]::new()
+    $state = @{ virtualBoxInstalled = $false }
+    $script:messages = @()
+    function HasCmd([string]$Name) { return $Name -eq "winget.exe" }
+    function Test-Path { return $false }
+    function winget.exe {
+      $calls.Add(($args -join " "))
+      switch ($args[2]) {
+        "Docker.DockerDesktop" { $global:LASTEXITCODE = 0 }
+        "Oracle.VirtualBox" {
+          if ($args[0] -eq "install") { $state.virtualBoxInstalled = $true }
+          $global:LASTEXITCODE = if ($state.virtualBoxInstalled) { 0 } else { [int]0x8A150014 }
+        }
+        "Google.PlatformTools" { $global:LASTEXITCODE = 1 }
+        default { throw "Unexpected package: $($args[2])" }
+      }
+    }
+    Install-MissingExtras
+    Install-MissingExtras
+    $installs = @($calls | Where-Object { $_ -like "install *" })
+    if ($installs.Count -ne 1 -or $installs[0] -ne "install --id Oracle.VirtualBox --exact --source winget --interactive") {
+      throw "Extras must install only confirmed missing tools, without accepting license terms."
+    }
+    if (-not ($messages -match "Docker Desktop already installed") -or -not ($messages -match "Could not check whether Android platform-tools")) {
+      throw "Extras did not report installed or unverified tools."
+    }
+  }
+  Write-Host "PASS: extras skip installed tools, install missing tools once, and report unavailable checks"
 
   if ($VerifyBrowsers) {
     $runtime = Join-Path $PSScriptRoot "../chat-ui/node_modules/playwright-core"

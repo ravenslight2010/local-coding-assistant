@@ -7,6 +7,7 @@ set "REPO=%~dp0"
 set "SETUP=%~dp0scripts\ca\setup.ps1"
 set "STARTUP="
 set "TESTBROWSERS="
+set "EXTRAS="
 set "LAUNCH=-LaunchChat"
 
 :parse
@@ -14,6 +15,7 @@ if "%~1"=="" goto done
 if /i "%~1"=="/startup" set "STARTUP=-AddStartup"
 if /i "%~1"=="/nolaunch" set "LAUNCH=-NoLaunch"
 if /i "%~1"=="/testbrowsers" set "TESTBROWSERS=-InstallTestBrowsers"
+if /i "%~1"=="/extras" set "EXTRAS=-InstallExtras"
 shift
 goto parse
 :done
@@ -34,7 +36,7 @@ if not %errorlevel%==0 (
 
 echo Source: %REPO%
 echo Agent:  %AGENT%
-powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SETUP%" -RepoRoot "%REPO%" -AgentRoot "%AGENT%" %STARTUP% %LAUNCH% %TESTBROWSERS%
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%SETUP%" -RepoRoot "%REPO%" -AgentRoot "%AGENT%" %STARTUP% %LAUNCH% %TESTBROWSERS% %EXTRAS%
 set "EC=%ERRORLEVEL%"
 echo.
 if %EC%==0 (echo Setup OK) else (echo Setup FAILED - see %AGENT%\logs)
