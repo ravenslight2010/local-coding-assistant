@@ -50,7 +50,7 @@
     .coding-toggle { display:flex; align-items:center; gap:0.35rem; color:var(--text); font-size:0.8rem; white-space:nowrap; }
     .coding-toggle input { accent-color:var(--accent); }
     .repo-picker { display:flex; gap:0.3rem; margin-bottom:0.45rem; }
-    .repo-picker input { min-width:0; flex:1; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); padding:0.35rem; font:inherit; font-size:0.72rem; }
+    .repo-picker input { min-width:0; flex:1; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); padding:0.35rem; font:inherit; font-size:0.72rem; direction:rtl; text-align:left; text-overflow:ellipsis; }
     .repo-picker button { padding:0.3rem 0.45rem; font-size:0.72rem; }
     #repoBrowser { width:min(32rem,calc(100% - 1.5rem)); max-height:calc(100dvh - 1.5rem); overflow:auto; padding:1rem; border:1px solid var(--border); border-radius:12px; background:var(--panel); color:var(--text); }
     #repoBrowser::backdrop { background:#0009; }
@@ -714,7 +714,7 @@
       includeContext = s.includeContext === true;
       document.getElementById("contextPack").checked = includeContext;
       currentRepo = s.repo || "";
-      document.getElementById("repoPath").value = currentRepo;
+      const rp = document.getElementById("repoPath"); rp.value = currentRepo; rp.title = currentRepo;
       contextFiles.clear();
       log.innerHTML = "";
       for (const m of messages) addMsg(m.role, m.content);
@@ -907,7 +907,7 @@ document.getElementById("expBtn").onclick = async () => {
       const r = await fetch(sessionUrl("/api/health"));
       const h = await r.json();
       currentRepo = h.repoRoot || "";
-      document.getElementById("repoPath").value = currentRepo;
+      const rp = document.getElementById("repoPath"); rp.value = currentRepo; rp.title = currentRepo;
       if (!h.shellAllowed) {
         addMsg("system", "Code loop can inspect files and propose approved edits. To run tests, launch with CA_ALLOW_SHELL=1; each command still needs your approval.");
       }
@@ -1175,6 +1175,7 @@ document.getElementById("searchBadge").onclick = () => {
 
     async function selectTypedRepository() {
       const selected = document.getElementById("repoPath").value.trim();
+      document.getElementById("repoPath").title = selected;
       if (!selected) return;
       try { await selectRepository(selected); }
       catch (error) { addMsg("system", "Repository selection failed: " + error.message); }
