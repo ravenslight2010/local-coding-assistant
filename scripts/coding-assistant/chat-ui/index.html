@@ -263,22 +263,35 @@
   <script>
     window.addEventListener("error", (e) => {
       const log = document.getElementById("log");
-      if (log && !log.textContent) {
+      if (log) {
         const el = document.createElement("div");
         el.className = "msg system";
-        el.textContent = "UI failed to load: " + (e.message || e.error || "unknown error") + ". Hard-refresh (Ctrl+Shift+R) or check the server is running.";
+        el.textContent = "Error: " + (e.message || "unknown") + " at " + (e.filename || "") + ":" + (e.lineno || "");
         log.appendChild(el);
       }
     });
+    fetch("/api/health").then(r => r.json()).then(h => {
+      const b = document.getElementById("ollama");
+      if (b) { b.textContent = h.ollama && h.ollama.ok ? "ollama: up" : "ollama: down"; b.className = h.ollama && h.ollama.ok ? "badge ok" : "badge"; }
+      const sb = document.getElementById("selfBadge");
+      if (sb && sb.textContent === "checking") sb.textContent = "partial";
+    }).catch(() => {
+      const sb = document.getElementById("selfBadge");
+      if (sb) sb.textContent = "offline";
+    });
     setTimeout(() => {
       const log = document.getElementById("log");
-      if (log && !log.textContent) {
-        const el = document.createElement("div");
-        el.className = "msg system";
-        el.textContent = "UI still loading. If this stays, the server may not be running. Check the terminal that launched Code Agent.";
-        log.appendChild(el);
+      const sb = document.getElementById("selfBadge");
+      if (sb && sb.textContent === "checking") {
+        sb.textContent = "script fail";
+        if (log && !log.textContent) {
+          const el = document.createElement("div");
+          el.className = "msg system";
+          el.textContent = "The main script did not run. Open F12 console and look for a red error about chat-stream.mjs or tool-policy.mjs.";
+          log.appendChild(el);
+        }
       }
-    }, 8000);
+    }, 5000);
   </script>
   <script type="module">
     import { consumeChatStream } from "/chat-stream.mjs";
