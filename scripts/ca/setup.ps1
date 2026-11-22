@@ -292,10 +292,14 @@ function Ensure-TestingStack {
   $cli = Join-Path $AgentRoot "app/ui/node_modules/playwright-core/cli.js"
   try {
     if (Test-Path -LiteralPath $cli -PathType Leaf) {
-      Info "Installing optional Playwright browsers (chromium, firefox, webkit)"
-      & node $cli install chromium firefox webkit
-      if ($LASTEXITCODE -ne 0) { Info "Playwright browser install exited $LASTEXITCODE; Code Agent can still use installed Edge." }
-      else { Info "Playwright browsers ready" }
+      Info "Installing optional Playwright browser (chromium only)"
+      $prev = $ErrorActionPreference
+      $ErrorActionPreference = "Continue"
+      $out = & cmd.exe /d /s /c "node `"$cli`" install chromium" 2>&1
+      $code = $LASTEXITCODE
+      $ErrorActionPreference = $prev
+      if ($code -ne 0) { Info "Playwright browser install exited $code; Code Agent can still use installed Edge." }
+      else { Info "Chromium ready" }
     } else {
       Info "Playwright CLI missing; skipping optional browser downloads."
     }
