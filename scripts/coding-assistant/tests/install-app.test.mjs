@@ -141,26 +141,31 @@ test("Install app shows the selected repo, cancels without running it, and compl
   });
   try {
     const page = await browser.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.addInitScript(() => localStorage.setItem("ca_session", "browser-install"));
     await page.goto(base);
-    const button = page.getByRole("button", { name: "Install app" });
+    const menu = page.getByRole("combobox", { name: "More" });
+    await page.getByText(/^(ready|check|offline)$/, { exact: true }).waitFor();
+    assert.deepEqual(pageErrors, []);
     const cancel = page.waitForEvent("dialog").then(async (dialog) => {
       const message = dialog.message();
       await dialog.dismiss();
       return message;
     });
-    await button.click();
+    await menu.selectOption("install");
     const prompt = await cancel;
     assert.ok(prompt.includes(realpathSync.native(root)), prompt);
     assert.match(prompt, /npm install/);
     assert.equal(existsSync(path.join(root, "installed.txt")), false);
     const confirm = page.waitForEvent("dialog").then((dialog) => dialog.accept());
-    await button.click();
+    await menu.selectOption("install");
     await confirm;
     await page.getByText(/^Installation complete\./).waitFor({ timeout: 15_000 });
     const marker = path.join(root, "installed.txt");
     for (let i = 0; !existsSync(marker) && i < 100; i++) await delay(30);
     assert.equal(readFileSync(marker, "utf8"), "ok");
+    assert.deepEqual(pageErrors, []);
   } finally {
     await browser.close();
   }

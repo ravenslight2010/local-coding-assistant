@@ -2,10 +2,9 @@
 setlocal EnableExtensions
 title Get Code Agent
 echo Code Agent installer/updater v4
+set "VERSION=de9d69814e29c118b60a8e9feb4bcd7eb01669b7"
+set "EXPECTED=ce382c24eff4c6f726303c9cb70d4d33b83ed5609ea31af0767115a1d300e2d0"
 echo Source pin: %VERSION%
-
-set "VERSION=2caf15d15846c0666ddcf2979a65cd63330e83bb"
-set "EXPECTED=94e11faa172601585d239f750a6711b6bd9b27adba00c9ed14d943ff0712976d"
 set "AGENT=C:\runcalc\agent"
 set "SOURCE=%AGENT%\source\%VERSION%"
 set "STARTUP="
