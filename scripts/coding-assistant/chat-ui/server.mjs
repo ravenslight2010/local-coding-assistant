@@ -229,7 +229,7 @@ Write tools (approval required):
 \`\`\`tool
 {"tool":"patch","files":[{"path":"a","old":"...","new":"..."},{"path":"b","content":"new file"}]}
 \`\`\`
-Test tool (use this when asked to test; do not invent npm test):
+Test tool (ALWAYS use this when asked to test. Do NOT use shell with npm test. Do NOT cd anywhere.):
 \`\`\`tool
 {"tool":"test","hint":"what changed"}
 {"tool":"lint"}
@@ -1442,6 +1442,8 @@ if (req.method === "POST" && url.pathname === "/api/tool/apply") {
     }
     if (tool.tool === "shell") {
       if (process.env.CA_ALLOW_SHELL !== "1") return send(res, 403, { error: "shell disabled" });
+      const cdMatch = tool.command.match(/\bcd\s+(\/|\w:)/i);
+      if (cdMatch) return send(res, 400, { error: "shell stays in the selected repo; do not cd to an absolute path. Use the test tool for tests." });
       const { spawn } = await import("node:child_process");
       if (res.destroyed) return;
       const isWin = process.platform === "win32";
