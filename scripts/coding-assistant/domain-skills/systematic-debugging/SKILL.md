@@ -18,3 +18,9 @@ Do not guess. Find the cause.
 ## Rules
 - No fix until you can point at the line and the reason.
 - If you cannot reproduce it, say so. Do not patch blind.
+
+
+## Advanced
+- Regression (used to work): use the git-bisect skill.
+- Large failing input: use the input-reduction skill first.
+- After the fix, the regression test should fail on the old code and pass on the new.
