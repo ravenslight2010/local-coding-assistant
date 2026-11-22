@@ -222,6 +222,7 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     '$env:RUNCALC_REPO = $repo'
     '$env:CA_AGENT_ROOT = $PSScriptRoot'
     '$env:CA_ALLOW_SHELL = ''1'''
+    'try {'
     '# Auto-update: if a newer pin is published, re-run Get-CodeAgent.cmd once'
     '$pinFile = Join-Path $PSScriptRoot ''source\pin.txt'''
     '$remote = ''https://raw.githubusercontent.com/ravenslight2010/local-coding-assistant/main/Get-CodeAgent.cmd'''
@@ -261,6 +262,13 @@ function Write-RunScript([string]$Repo, [string]$Model) {
     'if (-not $listening) { throw "Code Agent server did not start listening on port $port." }'
     '& (Join-Path $app ''ui\open-app.ps1'') -Port $port'
     'Write-Host "Code Agent model=$model repo=$repo pid=$($proc.Id)"'
+    'Write-Host "Server running. Leave this window open or press Enter to close."'
+    'Read-Host "Press Enter"'
+    '} catch {'
+    '  Write-Host "FAILED: $($_.Exception.Message)" -ForegroundColor Red'
+    '  Read-Host "Press Enter to close"'
+    '  exit 1'
+    '}'
   )
   Set-Content -LiteralPath $run -Value $lines -Encoding UTF8
 }
