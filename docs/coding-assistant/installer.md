@@ -3,8 +3,8 @@
 ## Current pin
 `Get-CodeAgent.cmd` installs immutable source:
 
-- Commit: `17fd41261dd9beebdc169fb7eb8591c5f5baf76a`
-- Archive SHA-256: `cac9dd60cead270215c6cf1a46e82e831772c652fa142539d4feb4c42435265f`
+- Commit: `3f7666a77bfed07eac7a85529a2bc8a5d080e37d`
+- Archive SHA-256: `aed7ffaa4445237f715d9b9ec0938876d2050fefc1be9629e1dfdb6999de4118`
 
 This pin makes all-in-one setup the default when you run the installer. The updater replaces only the installed Code Agent server; it does not stop a different program using the port.
 
